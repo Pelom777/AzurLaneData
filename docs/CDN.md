@@ -101,11 +101,11 @@ winget install Rclone.Rclone           # Windows
 
 ### 4.0 先建桶（Dashboard，一次性）
 
-1. R2 → **Create bucket**，名字 `azl-assets`，location 选 Automatic
+1. R2 → **Create bucket**，名字 `azurlane-assets`，location 选 Automatic
 2. 桶 → Settings → **Public Development URL** → Enable，记下 `pub-<32位ID>.r2.dev`
 3. 右上 **Manage R2 API Tokens** → Create API token
    - Permission: **Object Read & Write**
-   - 限定到 `azl-assets` 这一个桶
+   - 限定到 `azurlane-assets` 这一个桶
 4. 记下 `Access Key ID` / `Secret Access Key` / `Account ID`（secret 只显示一次）
 
 ### 顺序不能错
@@ -161,7 +161,7 @@ python scripts/azl_assets.py --server CN \
 ### 4.4 全量上传
 
 ```bash
-rclone copy public r2:azl-assets \
+rclone copy public r2:azurlane-assets \
   --exclude "data/**" \
   --transfers 16 --checkers 32 -P \
   --header-upload "Cache-Control: public, max-age=86400"
@@ -188,7 +188,7 @@ rclone copy public r2:azl-assets \
 | `R2_ACCOUNT_ID` | 账号 ID（32 位 hex） | Dashboard 右侧栏 / R2 Overview |
 | `R2_ACCESS_KEY_ID` | token 的 Access Key ID | §4.0 第 3 步 |
 | `R2_SECRET_ACCESS_KEY` | token 的 Secret Access Key | §4.0 第 3 步（只显示一次） |
-| `R2_BUCKET` | `azl-assets` | 自己起的名字 |
+| `R2_BUCKET` | `azurlane-assets` | 自己起的名字 |
 
 workflow 里第一步「检查 R2 凭据」会逐个点名缺失项，不会让 rclone 抛 AWS 的 XML 错误。
 
@@ -243,7 +243,7 @@ painting/<name>/<name>.json      ← painting 的 marker 是 json，不是 png
 
 ```bash
 # 0. 拉远端清单（桶为空时是空文件，不算失败）
-rclone lsf r2:azl-assets --files-only > .azl/remote.lst
+rclone lsf r2:azurlane-assets --files-only > .azl/remote.lst
 
 # 1. 补 marker，让增量判据在干净工作区成立
 python scripts/mark_remote.py --listing .azl/remote.lst --public public
@@ -262,7 +262,7 @@ python scripts/azl_assets.py --server CN \
 tr '\0' '\n' < .azl/written.list | sed 's|^public/||' | sed '/^$/d' > .azl/upload.lst
 
 # 4. 只推这次写出的，不做远端比对
-rclone copy public r2:azl-assets \
+rclone copy public r2:azurlane-assets \
   --files-from .azl/upload.lst \
   --ignore-times --transfers 16 --checkers 32 \
   --header-upload "Cache-Control: public, max-age=86400"

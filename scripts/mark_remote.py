@@ -29,7 +29,7 @@ state 是「已经产出并已推送」的账本，**远端存在同名对象就
     <item>/<name>.png                ← 其余类别
 
 用法：
-    rclone lsf r2:azl-assets --files-only > .azl/remote.lst
+    rclone lsf r2:azurlane-assets --files-only > .azl/remote.lst
     python scripts/mark_remote.py --listing .azl/remote.lst --public public
 """
 
