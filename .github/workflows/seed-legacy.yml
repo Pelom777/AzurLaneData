@@ -1,0 +1,120 @@
+name: seed-legacy
+
+# 一次性任务：把旧仓库 Pelom777/AzurLaneTools 的 public/<dir> 直接搬进 R2。
+#
+# 为什么不用本机：实测本机到 GitHub 只有约 120 KB/s，6.8 GB 要十几小时。
+# runner 和 GitHub 同机房，快两个数量级。
+#
+# 按目录分批，每批单独 clone、传完即删 —— 6.8 GB 全量 checkout 会撑爆 runner 磁盘
+# （工作区 + .git 双份）。painting 5.5 GB 必须单独跑。
+#
+# 只搬文件，不碰 state。建 state 走已有的 sync-assets（它有 mark_remote + --seed）：
+#   先跑本 workflow 把所有对象推上去，再跑一次 sync-assets，
+#   它会 lsf 到全量远端清单 → touch marker → --seed 补记录 → 顺带补齐 2025-06 之后的缺口。
+#
+# 跑完即可删除本文件。
+
+on:
+  workflow_dispatch:
+    inputs:
+      parts:
+        description: "要搬的目录（public/ 下的一级名，空格分隔）"
+        default: "squareicon shipicon equipicon paintingface shipbackground iconbackground iconframe voteicon squareback spinebase juusui"
+        type: string
+
+concurrency:
+  group: seed-legacy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUNBUFFERED: "1"
+  RCLONE_CONFIG_R2_TYPE: s3
+  RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+  RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+  RCLONE_CONFIG_R2_REGION: auto
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: 安装 rclone
+        run: |
+          curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone.zip
+          unzip -oq /tmp/rclone.zip -d /tmp/rclone
+          cp /tmp/rclone/rclone-*/rclone /usr/local/bin/rclone
+          chmod +x /usr/local/bin/rclone
+          rclone version | head -1
+
+      - name: 检查凭据
+        run: |
+          missing=""
+          [ -z "${{ secrets.R2_ACCOUNT_ID }}" ]      && missing="$missing R2_ACCOUNT_ID"
+          [ -z "${{ secrets.R2_ACCESS_KEY_ID }}" ]   && missing="$missing R2_ACCESS_KEY_ID"
+          [ -z "${{ secrets.R2_SECRET_ACCESS_KEY }}" ] && missing="$missing R2_SECRET_ACCESS_KEY"
+          [ -z "${{ secrets.R2_BUCKET }}" ]          && missing="$missing R2_BUCKET"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少 secrets:$missing"
+            exit 1
+          fi
+          echo "凭据齐全，桶 = ${{ secrets.R2_BUCKET }}"
+          df -h / | tail -1
+
+      - name: 搬运
+        run: |
+          set -euo pipefail
+          BUCKET="${{ secrets.R2_BUCKET }}"
+          DIRS="${{ inputs.parts }}"
+
+          # 一个批次只 clone 一次。blob:none + no-checkout 先只拿 tree，
+          # sparse-checkout 指定目录后才下该目录的 blob，避免把 6.8 GB 全拉下来。
+          rm -rf /tmp/legacy
+          git clone -q --filter=blob:none --depth 1 --no-checkout \
+            https://github.com/Pelom777/AzurLaneTools.git /tmp/legacy
+          cd /tmp/legacy
+          git sparse-checkout init --cone
+          # shellcheck disable=SC2086
+          git sparse-checkout set $(for d in $DIRS; do echo "public/$d"; done)
+          git checkout -q master
+
+          for d in $DIRS; do
+            echo "::group::$d"
+            if [ ! -d "public/$d" ]; then
+              echo "::warning::public/$d 不存在，跳过"
+              echo "::endgroup::"
+              continue
+            fi
+            n=$(find "public/$d" -type f | wc -l)
+            sz=$(du -sh "public/$d" | cut -f1)
+            echo " $d: $n 个文件 / $sz"
+
+            # copy 不 sync：R2 上已有的对象不能被删（别的批次已经传完的部分）
+            rclone copy "public/$d" "r2:$BUCKET/$d" \
+              --s3-no-check-bucket \
+              --transfers 32 --checkers 64 \
+              --header-upload "Cache-Control: public, max-age=86400" \
+              --stats 15s --stats-one-line
+            echo "::endgroup::"
+          done
+
+          df -h / | tail -1
+          cd /
+          rm -rf /tmp/legacy
+
+      - name: 汇总
+        if: always()
+        run: |
+          {
+            echo "### seed-legacy"
+            echo
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 批次 | \`${{ inputs.parts }}\` |"
+            echo "| 远端对象总数 | $(rclone lsf "r2:${{ secrets.R2_BUCKET }}" --files-only --recursive 2>/dev/null | wc -l) |"
+          } >> "$GITHUB_STEP_SUMMARY"
