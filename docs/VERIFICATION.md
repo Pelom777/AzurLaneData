@@ -134,6 +134,23 @@ marker。用 9 行假清单单测过：
 > 两个都已修（commit `20681d4`），第二次跑的「跳过 2」才是真的证明。
 > 教训：**「步骤绿了」和「事情做了」是两件事**，必须拿桶里的实际对象做交叉验证。
 
+### 公共读 r2.dev（2026-10-21）
+
+`https://pub-85b4b8af407244bc8f1502127fc530c3.r2.dev`
+
+| 检查 | 结果 |
+|---|---|
+| `GET /squareicon/22.png` | `200` / `image/png` / 27,131 字节 |
+| 下载后 md5 | `68c03aebc3a214113f228fa31b2a84de`，与桶内对象一致 → 原样托管，无转码 |
+| `Cache-Control` | `public, max-age=86400`（上传时设的元数据原样返回） |
+| 不存在的 key | `404`（不是 `403`，说明匿名读确实生效） |
+| 带 `Origin` 的 GET | **无任何 `Access-Control-*` 头** |
+| `OPTIONS` 预检 | **`403`** |
+
+最后两行是真问题：`<img>` 不受影响，但 `fetch` 拉 `spine/*.skel`、`painting/*.obj`
+会被浏览器拦。S3 API 的 `GetBucketCors` / `PutBucketCors` 均返回 `AccessDenied`（已实测），
+只能去 Dashboard 配，规则见 `docs/CDN.md` §3.1。
+
 ## 已知遗留
 
 - 每小时 cron 只握手比版本，没变就退；真正提交频率 = 游戏更新频率。

@@ -66,6 +66,19 @@ R2 桶开启 Public Development URL 后，地址是：
 https://pub-<32位桶ID>.r2.dev
 ```
 
+**本项目实际值**（2026-10-21 启用，已实测）：
+
+```
+https://pub-85b4b8af407244bc8f1502127fc530c3.r2.dev
+```
+
+实测证据：`GET /squareicon/22.png` 返回 `200`、`Content-Type: image/png`、
+`Content-Length: 27131`，下载后 md5 `68c03aebc3a214113f228fa31b2a84de`，
+与桶内对象**逐字节一致**；上传时设的 `Cache-Control: public, max-age=86400`
+原样返回；不存在的 key 返回 `404` 而非 `403`，说明匿名读确实生效。
+
+这个域名绑桶固定，以后买了域名只改 `VITE_CDN`，前端代码不用动。
+
 官方文档的原话是"not intended for production usage"、"variable rate limit"：
 
 | 限制 | 具体 | 对我们的影响 |
@@ -75,6 +88,40 @@ https://pub-<32位桶ID>.r2.dev
 | 安全/分析 | 无 WAF、无 URL 级分析 | 被爬时无法限流 |
 
 地址绑桶固定，以后买了域名只改 `VITE_CDN`，前端代码不用动。
+
+### 3.1 CORS：默认是关的，必须手工开一次
+
+实测（2026-10-21）：`r2.dev` 对带 `Origin` 的请求**不返回任何 `Access-Control-*` 头**，
+`OPTIONS` 预检直接 `403`。这不是 bug，是 R2 的默认状态。
+
+| 前端用法 | 受影响 |
+|---|---|
+| `<img src>`、`<video>`、CSS `url()` | 否 —— 这些走 no-cors，不加头也能显示 |
+| `fetch()` 拉 `painting/*.obj`、`spine/*.skel`、`*.atlas`、`*.json` | **是，会被浏览器拦** |
+| canvas 读像素（`getImageData`） | **是**，需要 CORS 且显式设 `crossOrigin="anonymous"` |
+
+**S3 API 改不了**：`GetBucketCors` / `PutBucketCors` 都返回 `AccessDenied`
+（已实测），R2 只允许在 Dashboard 配。
+
+Dashboard → 桶 → Settings → **CORS Policy** → Add，粘贴：
+
+```json
+[
+  {
+    "AllowedOrigins": ["*"],
+    "AllowedMethods": ["GET", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+`AllowedOrigins` 先给 `*`（还没有固定前端域名），买了域名后收紧成具体来源。
+配完用 `curl -I -H "Origin: https://example.com"` 确认响应里出现
+`Access-Control-Allow-Origin`，再 `curl -X OPTIONS` 确认预检不再是 403。
+
+这一步**不做，前端拿不到 spine 和 obj** —— 图片会正常显示，所以很容易被误判成
+"CDN 没问题"，直到加载立绘骨骼时才炸。
 
 如果决定买：Cloudflare Registrar 的 `.com` 是成本价约 $10/年，`.top`/`.xyz` 首年更便宜
 但续费贵。绑到 R2 是 Dashboard → R2 → 桶 → Settings → Custom Domains。
@@ -103,6 +150,7 @@ winget install Rclone.Rclone           # Windows
 
 1. R2 → **Create bucket**，名字 `azurlane-assets`，location 选 Automatic
 2. 桶 → Settings → **Public Development URL** → Enable，记下 `pub-<32位ID>.r2.dev`
+   ✅ 已完成：`https://pub-85b4b8af407244bc8f1502127fc530c3.r2.dev`（见 §3）
 3. 右上 **Manage R2 API Tokens** → Create API token
    - Permission: **Object Read & Write**
    - 限定到 `azurlane-assets` 这一个桶
@@ -350,10 +398,16 @@ r2.dev 因为没有 Cache 规则，实际上只看对象上的 `Cache-Control` �
 ## 8. 验收标准
 
 - [ ] R2 桶内对象数 = `19,443 - 21(data) = 19,422`（spine 含在内）
+      当前 **2**（联调产物 `squareicon/22.png`、`33.png`），等首次播种
+- [x] 公共读可用：`GET /squareicon/22.png` → `200` `image/png` 27,131 字节，
+      md5 `68c03aeb…` 与桶内一致；不存在 key → `404`（2026-10-21）
 - [ ] 任意抽 5 张立绘，`curl` 回来的字节数与原文件一致（原样托管，不做转码）
+      已验 **1/5**
+- [ ] CORS 已配（§3.1）。**不做这条，spine 和 obj 拉不到**，但图片正常，
+      所以很容易误判成「CDN 没问题」
 - [ ] `azl_assets.py --seed` 第二轮：`new = 0`、`seeded` 不再增长（state 接上了）
-- [ ] **CI 第二轮：`mark_remote` 补齐数 ≈ 远端 marker 数，`跳过` 数 ≈ 资源总数，
-      `新增` = 0**（这条证明空工作区陷阱真的被堵住了）
+- [x] **CI 第二轮：`mark_remote` 补齐数 = 远端 marker 数，`跳过` 数 = 资源总数，
+      `新增` = 0**（run `39612271958`：远端 2 → 补齐 2 → 跳过 2 / 新增 0）
 - [ ] 增量轮：改一张图后重跑，`written.list` 只有 1~3 行，R2 操作数 < 10
 - [ ] 版本没变的轮次：R2 Class A 操作数 = 0
 - [ ] 前端 `.env.production` 的 `VITE_CDN` 指向 R2，页面无 404、无图片裂图
