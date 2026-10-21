@@ -1,0 +1,8 @@
+# 解包链路的 Python 依赖。
+#
+# ljd 没有发布到 PyPI，官方只以 wheel 形式挂在 GitHub release 上，所以用 URL 直接引用。
+# 版本全部锁定：反编译结果会随 ljd 版本变化，固定版本才能让"新旧链路 json 一致"
+# 这个验收条件成立（见 docs/HANDOFF.md §4.1）。
+
+UnityPy==1.25.4
+ljd @ https://github.com/AzurLaneTools/ljd/releases/download/wheel/ljd-0.1.7-py3-none-any.whl
