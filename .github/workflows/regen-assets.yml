@@ -1,30 +1,39 @@
 name: regen-assets
 
-# 全量重建资源（按分片并行）。**日常增量走 sync-assets.yml，不要用这个。**
+# 重建资源：按 crc32(名字) 切成 N 片并行跑，每片跑完即上传、即丢弃。
 #
-# 什么时候用它：
-#   - 首次入库 / 换桶 / 从未生成过的类别
-#   - 改了渲染实现（升 UnityPy、改立绘合成）后需要按当前版本重生一遍
-#   - 不想信任旧快照：本 workflow **不用 --seed**，所有产物都从当前 CDN 现取，
-#     所以产出的一定是官方当前版本，而不是某个历史快照
+# 和 sync-assets.yml 的分工：
+#   sync-assets = 日常增量，单 job，够用就用它
+#   regen-assets = 重建。差别只在「能一次吃下多大的量」——painting 全量约
+#                  2491 张 / 下载 3.7 GB / 产物 5.6 GB，单 job 撑不住。
 #
-# 为什么必须分批（这是本文件存在的理由）：
-#   painting 全量 2,491 张 = 下载 3.7 GB + 产物 5.6 GB。托管 runner 的 / 只有
-#   约 14 GB，一次跑完峰值约 9.3 GB，且中途无法回收。按 crc32(名字) % N 切成
-#   N 片后，每片峰值约 1.7 GB（N=6），跑完立刻上传并删掉，磁盘占用与 N 成反比。
-#   分片键用 crc32 而不是 hash()：后者按进程随机化，换一次进程分片就变了。
+# 什么时候用：
+#   - 首次入库（state 里没有这批资源，等于全量重生）
+#   - 换了桶 / 目标产物丢了，需要从当前 CDN 重拉一遍
+#   - 改了渲染实现（升 UnityPy、改合成算法），要按当前版本整体重出一版
 #
-# 时间预算（实测单张 2.2s 渲染）：
-#   6 片并行 ≈ 20 分钟（含安装依赖）；串行则约 2 小时。job 上限设 120 分钟，
-#   任一环节超时都会先被杀掉，不会占着 runner 空转。
+# 「以后更新时也能用」是靠 state 继承做到的，不是靠每次重跑：
+#   每个分片先 `cp .azl/assets-state.json .azl/state-N.json` 继承基线，
+#   再配合 mark_remote 把「远端已有对象」翻译成本地 marker。
+#   于是判据仍然是原本那一条（state 的 md5 一致 **且** 产物在磁盘），语义不变：
+#     · 首次      state 里没有 → 全部重新生成
+#     · 之后      只有官方改过的（md5 变了）才重做，其余跳过
+#   刻意**不用 --seed**：seed 会在「远端有、state 没记」时跳过，
+#   等于把「托管上的那份就是最新版」这个不可验证的假设写进 state，
+#   之后官方改了内容也不会被发现。宁可多花几分钟重解，也不要静默停在旧版。
 #
-# 前置条件：public/data 必须是**当前版本**的数据。它决定 --scope used 的引用集，
-#   数据旧了会漏掉新船（实测旧数据漏 333 张立绘）。不确定就先 dispatch 一次
-#   update-data（force=true）把它刷新。
+# 为什么必须分片（本文件存在的理由）：
+#   托管 runner 的 / 只有约 14 GB（实测量过），一次跑完峰值约 9.3 GB 且中途
+#   无法回收。切成 6 片后每片约 下载 0.6 GB + 产物 0.9 GB ≈ 1.6 GB，安全。
+#   分片键用 crc32 而不是 hash()：后者按进程随机化，换一次进程分片就飘了。
 #
-# 容量预算（R2 免费额度 10 GB）：
-#   painting 5.6 GB + paintingface 0.6 GB + 图标 0.26 GB + spine 1.10 GB ≈ 7.6 GB。
-#   paintingface 是随 painting 一起出的（export_painting 顺带写表情），别当成漏算。
+# 时间预算（实测单张约 2.2s 渲染）：
+#   6 片并行 ≈ 20 分钟（含装依赖）；串行则约 2 小时。
+#   注意这里用的是 free 账号额度：一次全量 ≈ 6 × 20 = 120 分钟，别频繁跑。
+#
+# 前置：public/data 必须是**当前版本**的数据。它决定 --scope used 的引用集，
+#   数据旧了会漏掉新船（实测旧 16 个月的数据会漏 333 张立绘）。
+#   不放心就先 dispatch 一次 update-data（force=true）。
 
 on:
   workflow_dispatch:
@@ -34,7 +43,7 @@ on:
         default: "painting"
         type: string
       shards:
-        description: "分片数（1-16；6 时每片约 1.7 GB，越大越省磁盘）"
+        description: "分片数（1-16；6 时每片约 1.6 GB，越大越省磁盘）"
         default: "6"
         type: string
       scope:
@@ -43,11 +52,11 @@ on:
         type: choice
         options: [used, all]
       force:
-        description: "忽略 state，连未变化的也重做"
+        description: "忽略 state 里已存在的 md5，连未变化的也重做"
         default: false
         type: boolean
       dry_run:
-        description: "只生成，不上传、不提交"
+        description: "只生成，不拉远端、不上传、不提交"
         default: false
         type: boolean
 
@@ -69,12 +78,15 @@ env:
   RCLONE_CONFIG_R2_REGION: auto
 
 jobs:
-  # 把 "片数" 变成一个真正的矩阵数组。用 fromJSON 动态生成，而不是写死
-  # [0,1,2,3,4,5]——写死的话改 shards 输入不会生效，那输入就是假的。
+  # 1) 把"分片数"变成真正的矩阵数组。写死 [0,1,2,3,4,5] 的话改 shards 输入不会
+  #    生效，那个输入就是假的。
+  # 2) 远端清单只拉一次做成 artifact，六个分片共用同一份快照。各片自己拉也没错，
+  #    但会让"同一轮里不同片看到的远端不一样"成为可能，排查时会很难解释。
   prep:
     runs-on: ubuntu-latest
     outputs:
       shards: ${{ steps.gen.outputs.shards }}
+      remote: ${{ steps.lsf.outputs.remote }}
     steps:
       - name: 生成分片矩阵
         id: gen
@@ -88,31 +100,8 @@ jobs:
           fi
           echo "shards=$(python3 -c 'import json,sys;print(json.dumps(list(range(int(sys.argv[1])))))' "$N")" >> "$GITHUB_OUTPUT"
 
-  regen:
-    needs: prep
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    strategy:
-      # 一片失败不要把其他片也掐掉：成功的片段仍有价值（state 会记录），
-      # 下次 dispatch 少做一片。
-      fail-fast: false
-      matrix:
-        shard: ${{ fromJSON(needs.prep.outputs.shards) }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: 安装依赖
-        run: |
-          python -m pip install -q --upgrade pip
-          python -m pip install -q -r requirements.txt
-          python -c "import cv2, numpy, UnityPy; print('cv2', cv2.__version__, '| numpy', numpy.__version__, '| UnityPy', UnityPy.__version__)"
-
       - name: 安装 rclone
+        if: ${{ !inputs.dry_run }}
         run: |
           curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone.zip
           unzip -oq /tmp/rclone.zip -d /tmp/rclone
@@ -134,7 +123,95 @@ jobs:
           fi
           echo "凭据齐全，桶 = ${{ secrets.R2_BUCKET }}"
 
-      # 磁盘先体检再开跑。跑到一半写满的失败最难查：表现是 cv2 报 IO 错、
+      - name: 拉取远端对象清单
+        id: lsf
+        if: ${{ !inputs.dry_run }}
+        run: |
+          mkdir -p .azl
+          # --recursive 不能省：rclone lsf 默认只列一层，而产物全在 <item>/ 子目录下。
+          # 不加这句列出来永远是空的，mark_remote 会静默失效（已经踩过一次）。
+          if ! rclone lsf "r2:${{ secrets.R2_BUCKET }}" --files-only --recursive > .azl/remote.lst; then
+            echo "::error::读不到桶 ${{ secrets.R2_BUCKET }}（先按 docs/CDN.md §4.0 建桶，"
+            echo "::error::并确认 token 有 Object Read & Write 权限）"
+            exit 1
+          fi
+          n=$(wc -l < .azl/remote.lst)
+          echo "远端已有 $n 个对象"
+          echo "remote=$n" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.dry_run }}
+        with:
+          name: remote-listing
+          path: .azl/remote.lst
+          retention-days: 1
+          if-no-files-found: error
+
+  regen:
+    needs: prep
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      # 一片失败不要把其他片也掐掉：成功的片段仍有价值（state 会记录），
+      # 下次 dispatch 就少做一片。
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.prep.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install -q --upgrade pip
+          python -m pip install -q -r requirements.txt
+          python -c "import cv2, numpy, UnityPy; print('cv2', cv2.__version__, '| numpy', numpy.__version__, '| UnityPy', UnityPy.__version__)"
+
+      - name: 安装 rclone
+        if: ${{ !inputs.dry_run }}
+        run: |
+          curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone.zip
+          unzip -oq /tmp/rclone.zip -d /tmp/rclone
+          cp /tmp/rclone/rclone-*/rclone /usr/local/bin/rclone
+          chmod +x /usr/local/bin/rclone
+
+      - name: 取远端清单
+        if: ${{ !inputs.dry_run }}
+        uses: actions/download-artifact@v4
+        with:
+          name: remote-listing
+          path: .azl
+
+      # 干净 checkout 里 public/<item>/ 被 .gitignore 挡在外面，判据的第二个条件
+      # （产物文件存在）恒为假。远端存在同名对象就是它的等价证据。
+      - name: 补齐本地 marker
+        if: ${{ !inputs.dry_run }}
+        run: python scripts/mark_remote.py --listing .azl/remote.lst --public public
+
+      # 继承基线 state：这是"以后还能用"的关键。
+      # 若各片从空 state 起手，每次 dispatch 都会全量重解一遍。
+      - name: 准备分片 state
+        run: |
+          SHARD="${{ matrix.shard }}"
+          [ -f .azl/assets-state.json ] || echo '{}' > .azl/assets-state.json
+          cp .azl/assets-state.json ".azl/state-$SHARD.json"
+          python - <<'PY'
+          import json, shutil
+          d = json.load(open('.azl/assets-state.json', encoding='utf-8'))
+          items = d.get('items') or {}
+          desc = ', '.join('%s=%d' % (k, len(v)) for k, v in items.items()) or '空'
+          total = sum(len(v) for v in items.values())
+          print(f'基线 state：{desc}（共 {total} 条）')
+          shutil.copyfile('.azl/assets-state.json',
+                          '.azl/state-${{ matrix.shard }}.json')
+          print('已复制为分片 state：.azl/state-${{ matrix.shard }}.json')
+          PY
+
+      # 磁盘先体检再开跑。跑到一半写满是最难查的失败：表现是 cv2 报 IO 错、
       # 或者 png 只有半张，看不出是容量问题。
       - name: 磁盘预检
         run: |
@@ -160,23 +237,22 @@ jobs:
           start=$(date +%s)
           python scripts/azl_assets.py $ARGS
           echo "耗时 $(( $(date +%s) - start ))s"
-          echo "written=$(tr -cd '\0' < .azl/written-$SHARD.list | wc -c)" >> "$GITHUB_OUTPUT"
 
-      # 用 copy 不用 sync：sync 会删远端多余对象（spine 是手工搬的，不在任何
-      # 一次生成的清单里，会被一并删掉）。--ignore-times：清单已是精确变更集。
+      # 用 copy 不用 sync：sync 会删远端多余对象（spine 是手工搬的，不在任何一次
+      # 生成的清单里，会被一并删掉）。--ignore-times：清单已是精确变更集。
       # --s3-no-check-bucket：R2 对受限 token 的 HeadBucket 返回 403，rclone 会
       # 误判桶不存在并尝试 CreateBucket，然后整体失败。
       - name: 上传（分片 ${{ matrix.shard }}）
         if: ${{ !inputs.dry_run }}
         run: |
           SHARD="${{ matrix.shard }}"
-          tr '\0' '\n' < .azl/written-$SHARD.list | sed 's|^public/||' | sed '/^$/d' \
-            > .azl/upload-$SHARD.lst
-          n=$(wc -l < .azl/upload-$SHARD.lst)
+          tr '\0' '\n' < ".azl/written-$SHARD.list" | sed 's|^public/||' | sed '/^$/d' \
+            > ".azl/upload-$SHARD.lst"
+          n=$(wc -l < ".azl/upload-$SHARD.lst")
           echo "分片 $SHARD 待上传 $n 个对象"
           if [ "$n" -eq 0 ]; then echo "清单为空，跳过上传"; exit 0; fi
           rclone copy public "r2:${{ secrets.R2_BUCKET }}" \
-            --files-from .azl/upload-$SHARD.lst \
+            --files-from ".azl/upload-$SHARD.lst" \
             --ignore-times \
             --s3-no-check-bucket \
             --transfers 16 --checkers 32 \
@@ -196,13 +272,15 @@ jobs:
             echo
             echo "| 项 | 值 |"
             echo "|---|---|"
+            echo "| 新增 / 变更 / 失败 | ${{ steps.gen.outputs.new || '-' }} / ${{ steps.gen.outputs.changed_count || '-' }} / ${{ steps.gen.outputs.failed || '-' }} |"
+            echo "| 写出文件 | ${{ steps.gen.outputs.files || '-' }} |"
             echo "| 待上传对象 | ${queued} |"
             echo "| public/ 体积 | ${out:-?} MB |"
             echo "| 残留可用磁盘 | ${disk} MB |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # 每片的 state 单独落一个文件。不能让大家同时写同一个文件——6 个 job
-      # 各写各的，最后在 merge 里合并；否则后跑的会覆盖先跑的。
+      # 每片单独落一个 state 文件 —— 六个 job 各写各的，最后在 merge 里合成。
+      # 不能共用同一个文件：并行 job 无法互相看见改动，后写完的会盖掉先写完的。
       - name: 上传 state 片段
         if: ${{ !inputs.dry_run }}
         uses: actions/upload-artifact@v4
@@ -212,14 +290,18 @@ jobs:
           retention-days: 3
           if-no-files-found: warn
 
-  # 合并 state 并提交一次。state 进 git 是增量链路的前提：下一轮 sync-assets
-  # 靠它判断"这个资源的 md5 我已经按最新版生成过了"。
+  # 把各片 state 合成一份并提交。state 进 git 是增量链路的前提：下一轮
+  # regen / sync 都靠它判断"这个资源我已经按哪个 md5 生成过了"。
   merge:
     needs: [prep, regen]
     if: ${{ !inputs.dry_run && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
       - name: 取回各片 state
         uses: actions/download-artifact@v4
@@ -228,24 +310,54 @@ jobs:
           merge-multiple: true
           path: .azl/states
 
+      # 合并规则要小心：每个片段都是从**同一份基线**复制出来的，所以它里面既有
+      # 本片真正处理过的 key，也有照抄来的基线值。直接按顺序 union 的话，
+      # 排在后面的片段会用旧的基线值覆盖前面片段刚算出的新值。
+      #
+      # 所以按 key 做差分：只有"与基线不同"的那个值才是本片的新成果。
+      # 若同一个 key 冒出两个不同的新值，说明分片键漂了，保守保留基线并报警。
       - name: 合并 state
         run: |
           python - <<'PY'
           import glob, json
-          base = json.load(open('.azl/assets-state.json', encoding='utf-8'))
-          n = 0
-          for p in sorted(glob.glob('.azl/states/*.json')):
+
+          BASE = '.azl/assets-state.json'
+          base = json.load(open(BASE, encoding='utf-8'))
+          base.setdefault('items', {})
+          frags = sorted(glob.glob('.azl/states/*.json'))
+          if not frags:
+              raise SystemExit('::error::没有任何 state 片段，拒绝合并（生成环节大概全挂了）')
+
+          diff: dict[tuple[str, str], dict[str, list[str]]] = {}
+          for p in frags:
               frag = json.load(open(p, encoding='utf-8'))
               for srv, items in (frag.get('items') or {}).items():
-                  tgt = base.setdefault('items', {}).setdefault(srv, {})
-                  tgt.update(items)
-                  n += len(items)
+                  bmap = base['items'].setdefault(srv, {})
+                  for k, v in items.items():
+                      if bmap.get(k) == v:
+                          continue
+                      diff.setdefault((srv, k), {}).setdefault(v, []).append(p)
+
+          applied = conflicted = 0
+          for (srv, k), vals in diff.items():
+              if len(vals) == 1:
+                  base['items'][srv][k] = next(iter(vals))
+                  applied += 1
+              else:
+                  print(f'::warning::key {srv}:{k} 出现 {len(vals)} 个冲突值，保留基线')
+                  conflicted += 1
+
+          for p in frags:
+              frag = json.load(open(p, encoding='utf-8'))
               for srv, ver in (frag.get('version') or {}).items():
                   base.setdefault('version', {})[srv] = ver
-          json.dump(base, open('.azl/assets-state.json', 'w', encoding='utf-8'),
+
+          json.dump(base, open(BASE, 'w', encoding='utf-8'),
                     ensure_ascii=False, indent=1, sort_keys=True)
-          total = sum(len(v) for v in base.get('items', {}).values())
-          print(f'合并 {n} 条，state 共 {total} 条')
+          total = sum(len(v) for v in base['items'].values())
+          print(f'片段 {len(frags)} 个 → 应用 {applied} 条，冲突 {conflicted} 条')
+          print(f'state 现有 {total} 条：' +
+                ', '.join(f'{k}={len(v)}' for k, v in base['items'].items()))
           PY
 
       - name: 提交 state
@@ -255,4 +367,4 @@ jobs:
             exit 0
           fi
           python scripts/commit.py --paths .azl/assets-state.json \
-            --message "assets: 全量重建 ${{ inputs.items }}（${{ inputs.shards }} 片）"
+            --message "assets: 重建 ${{ inputs.items }}（${{ inputs.shards }} 片）"
