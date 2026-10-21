@@ -244,7 +244,10 @@ AzurLaneData/
 **首次全量**在托管 runner 上是有风险的：`ubuntu-latest` 可用磁盘约 14 GB，
 6.82 GB 资产 + 3~4 GB 中间文件 + 代码，余量很小。所以：
 
-- `azl_assets.py` 已支持 `--items` 按类别分批（`painting` / `squareicon` / `spine` …）
+- `azl_assets.py` 已支持 `--items` 按类别分批（`painting` / `squareicon` /
+  `shipicon` / `equipicon` / `paintingface` / `iconframe` 共 6 类）。
+  **`spine` 不在支持范围**（脚本里没有任何 spine 代码），只能从旧仓库搬一次，
+  见 `docs/CDN.md` §2
 - 首次建议**分 3~4 次 run**，每次只跑一两个大目录，state 会自动累积
 - `--seed` 的语义是"文件已在磁盘、但 state 没这条记录 → 补记录不下载"；
   如果资产根本不在磁盘上，`--seed` 帮不上忙，只能真下

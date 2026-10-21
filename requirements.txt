@@ -3,6 +3,16 @@
 # ljd 没有发布到 PyPI，官方只以 wheel 形式挂在 GitHub release 上，所以用 URL 直接引用。
 # 版本全部锁定：反编译结果会随 ljd 版本变化，固定版本才能让"新旧链路 json 一致"
 # 这个验收条件成立（见 docs/HANDOFF.md §4.1）。
+#
+# numpy / opencv 是 scripts/azl_assets.py（图片链路）用的，Lua 链路不需要。
+# 用 **headless** 而不是 opencv-python：后者 import 时要找 libGL.so.1，
+# ubuntu runner 上没有，得额外 apt install libgl1。azl_assets 只用
+# cvtColor / flip / 切片，全程不碰 GUI，headless 完全够（import 名同样是 cv2）。
+#
+# numpy 显式锁定：opencv 5 的 wheel 声明 numpy>=2 但没写上限，
+# 主版本漂移会让 cvtColor 的 dtype 行为变化。这里和本地实测值对齐。
 
 UnityPy==1.25.4
 ljd @ https://github.com/AzurLaneTools/ljd/releases/download/wheel/ljd-0.1.7-py3-none-any.whl
+numpy==2.5.4
+opencv-python-headless==5.0.0.93

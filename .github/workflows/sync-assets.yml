@@ -1,0 +1,167 @@
+name: sync-assets
+
+# 把贴图/立绘推到 Cloudflare R2。**不挂 cron** —— 由 update-data 的版本变化
+# 或人工 dispatch 触发，避免每小时产生无意义的 R2 写操作。
+#
+# 为什么不直接复用 update-data 的 job：图片链路的失败面完全不同
+# （UnityPy 解码 / 网络大文件 / R2 凭据），失败时不该把数据更新一起拖红。
+# 数据 10 分钟能修好，图片可能几小时，混在一个 job 里会让 cron 反复重跑数据。
+#
+# 关键设计：CI 是干净 checkout，public/ 下的图被 .gitignore 挡在 git 之外，
+# 而 azl_assets.py 的跳过判据要求"产物文件存在"。所以先按远端对象清单
+# 补出 marker（scripts/mark_remote.py），否则每一轮都会全量重跑 5.9 GB。
+# 详见 docs/CDN.md §5。
+
+on:
+  workflow_dispatch:
+    inputs:
+      items:
+        description: "资源类别（空格分隔）"
+        default: "painting paintingface squareicon shipicon equipicon iconframe"
+        type: string
+      scope:
+        description: "used=只导 public/data 引用到的；all=清单全导"
+        default: used
+        type: choice
+        options: [used, all]
+      limit:
+        description: "每类最多处理几个（0 = 不限，调试用）"
+        default: "0"
+        type: string
+      dry_run:
+        description: "只生成不推送、不提交"
+        default: false
+        type: boolean
+
+concurrency:
+  group: sync-assets
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  SERVER: CN
+  PYTHONUNBUFFERED: "1"
+  RCLONE_CONFIG_R2_TYPE: s3
+  RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+  RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+  RCLONE_CONFIG_R2_REGION: auto
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install -q --upgrade pip
+          python -m pip install -q -r requirements.txt
+          python -c "import cv2, numpy, UnityPy; print('cv2', cv2.__version__, '| numpy', numpy.__version__)"
+
+      - name: 安装 rclone
+        run: |
+          curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone.zip
+          unzip -oq /tmp/rclone.zip -d /tmp/rclone
+          cp /tmp/rclone/rclone-*/rclone /usr/local/bin/rclone
+          chmod +x /usr/local/bin/rclone
+          rclone version | head -1
+
+      # 凭据缺失时给出明确的一句话，而不是让 rclone 抛 AWS 的 XML 错误
+      - name: 检查 R2 凭据
+        run: |
+          missing=""
+          [ -z "$RCLONE_CONFIG_R2_ACCESS_KEY_ID" ] && missing="$missing R2_ACCESS_KEY_ID"
+          [ -z "$RCLONE_CONFIG_R2_SECRET_ACCESS_KEY" ] && missing="$missing R2_SECRET_ACCESS_KEY"
+          [ -z "${{ secrets.R2_ACCOUNT_ID }}" ] && missing="$missing R2_ACCOUNT_ID"
+          [ -z "${{ secrets.R2_BUCKET }}" ] && missing="$missing R2_BUCKET"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少 secrets:$missing（配置方法见 docs/CDN.md §5.1）"
+            exit 1
+          fi
+          echo "凭据齐全，桶 = ${{ secrets.R2_BUCKET }}"
+
+      - name: 拉取远端对象清单
+        run: |
+          mkdir -p .azl
+          # 桶不存在会在这里失败，提示先建桶；桶为空则正常返回空文件
+          if ! rclone lsf "r2:${{ secrets.R2_BUCKET }}" --files-only > .azl/remote.lst; then
+            echo "::error::读不到桶 ${{ secrets.R2_BUCKET }}。先按 docs/CDN.md §4.0 建桶，"
+            echo "::error::并确认 token 有 Object Read & Write 权限。"
+            exit 1
+          fi
+          echo "远端已有 $(wc -l < .azl/remote.lst) 个对象"
+
+      # 核心：把"远端已存在"翻译成本地的 marker 文件，
+      # 让 azl_assets.py 的增量判据在干净工作区里也能成立
+      - name: 补齐本地 marker
+        run: python scripts/mark_remote.py --listing .azl/remote.lst --public public
+
+      - name: 生成资源
+        id: assets
+        run: |
+          ARGS="--server $SERVER --public public --cache .azl/bundles \
+                --state .azl/assets-state.json --scope ${{ inputs.scope }} \
+                --items ${{ inputs.items }} --report-files .azl/written.list"
+          if [ "${{ inputs.limit }}" != "0" ]; then ARGS="$ARGS --limit ${{ inputs.limit }}"; fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          # --seed：远端有、state 没有的记录属于"别的途径入库"，补记录而不重下。
+          # 与远端清单配合后，四种 state × 远端组合都能收敛（见 docs/CDN.md §5.2）。
+          echo "python scripts/azl_assets.py $ARGS --seed"
+          python scripts/azl_assets.py $ARGS --seed
+
+      - name: 推送增量到 R2
+        if: steps.assets.outputs.changed == 'true' && !inputs.dry_run
+        run: |
+          tr '\0' '\n' < .azl/written.list | sed 's|^public/||' | sed '/^$/d' > .azl/upload.lst
+          n=$(wc -l < .azl/upload.lst)
+          echo "本次待上传 $n 个对象"
+          if [ "$n" -eq 0 ]; then
+            echo "清单为空，跳过上传"
+            exit 0
+          fi
+          # 用 copy 不用 sync：sync 会删掉远端多余对象，而 spine 是手工搬进去的，
+          # 不在任何一次生成的清单里，会被一并删掉。
+          # --ignore-times：清单已经是精确变更集，不需要 rclone 再逐个比对。
+          rclone copy public "r2:${{ secrets.R2_BUCKET }}" \
+            --files-from .azl/upload.lst \
+            --ignore-times \
+            --transfers 16 --checkers 32 \
+            --header-upload "Cache-Control: public, max-age=86400" \
+            --stats 15s --stats-one-line
+
+      - name: 提交 state
+        if: ${{ !inputs.dry_run }}
+        run: |
+          if [ ! -f .azl/assets-state.json ]; then
+            echo "没有 state 文件（本轮没有产出），跳过"
+            exit 0
+          fi
+          python scripts/commit.py --paths .azl/assets-state.json \
+            --message "assets: $SERVER 资源增量（新增 ${{ steps.assets.outputs.new || 0 }} / 变更 ${{ steps.assets.outputs.changed_count || 0 }}）"
+
+      - name: 摘要
+        if: always()
+        run: |
+          {
+            echo "### sync-assets"
+            echo
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 类别 | \`${{ inputs.items }}\` |"
+            echo "| scope / limit | ${{ inputs.scope }} / ${{ inputs.limit }} |"
+            echo "| 远端对象（补齐前） | $(wc -l < .azl/remote.lst 2>/dev/null || echo -) |"
+            echo "| 新增 / 变更 / 失败 | ${{ steps.assets.outputs.new || '-' }} / ${{ steps.assets.outputs.changed_count || '-' }} / ${{ steps.assets.outputs.failed || '-' }} |"
+            echo "| 待上传 | $(wc -l < .azl/upload.lst 2>/dev/null || echo -) |"
+            echo "| dry-run | ${{ inputs.dry_run }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
