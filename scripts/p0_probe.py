@@ -271,14 +271,37 @@ def main() -> int:
             log(f"{name}: {len(texts)}/{done} 段反编译成功，"
                 f"条目 {item.get('entries', '?')}，{item['seconds']}s")
 
+    # ---- 4.5 生产路径：直接调用 unpack_lua，验证 CI 真正跑的那段代码
+    #      前面几个假设是"手工试出来的"，这一段才是将来每小时跑的东西。
+    try:
+        import shutil  # noqa: PLC0415
+
+        import unpack_lua  # noqa: PLC0415
+
+        cache_dir = work / "cache-probe"
+        shutil.rmtree(cache_dir, ignore_errors=True)   # 清缓存，保证真的重算
+        t0 = time.time()
+        text = unpack_lua.unpack_sharecfgdata(bundle, cache_dir)
+        prod = {"ok": True, "lua_len": len(text),
+                "seconds": round(time.time() - t0, 1), "_text": text}
+    except Exception as exc:  # noqa: BLE001
+        prod = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:300]}"}
+    prod_item = {k: v for k, v in prod.items() if not k.startswith("_")}
+    if prod["ok"]:
+        prod_item.update(summarize_text(prod["_text"]))
+        prod_item["_text"] = prod["_text"]
+    results["H6_production_unpack_lua"] = prod_item
+    log(f"H6_production_unpack_lua: {'ok' if prod['ok'] else 'fail'} "
+        f"{prod_item.get('error', '')} 条目 {prod_item.get('entries', '?')}")
+
     report["hypotheses"] = {k: {kk: vv for kk, vv in v.items() if not kk.startswith("_")}
                             for k, v in results.items()}
 
-    # ---- 5. 挑最优：能出条目且条目数最多的
+    # ---- 5. 挑最优：生产路径优先，其次按条目数
     best_name, best = None, None
     for name, res in results.items():
         if res.get("ok") and res.get("entries"):
-            if best is None or res["entries"] > best["entries"]:
+            if best is None or res["entries"] >= best["entries"]:
                 best_name, best = name, res
 
     if best is None:

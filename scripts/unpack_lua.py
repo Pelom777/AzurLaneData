@@ -23,10 +23,15 @@ B. `scripts32`             —— 39 MB，整体加密的 UnityFS
     python scripts/unpack_lua.py --server CN --out raw --work cache
     python scripts/unpack_lua.py --server CN --out raw --only ship_data_statistics
 
-⚠️ 验证状态（截至 2026-10-21，CN 9.7.25）
-    已实测：登录服握手 / hash 清单 / bundle 下载 / sharecfgdata 的 uleb128 分段
-            （219 段正好铺满文件）/ 图片 bundle 是明文 UnityFS
-    待实测：bcdec 与 ljd 在本机与 runner 上的实际行为（见 HANDOFF 的「未验证项」）
+⚠️ 验证状态（2026-10-21 实测，CN 9.7.398）
+    已跑通：`weapon_name` 2422 段 → bcdec 全成功（1.5s）→ ljd 逐段反编译
+            （2.7s）→ 2422 条，产出的 json 与旧链路**逐字节相同**
+            （md5 ed8329b1b0601b00b64e13b8e6a24f53 / 85,011 字节）。
+            证据见 scripts/p0_probe.py 的 report。
+    重要修正：**不要**把多段字节码拼起来再反编译（原写法如此，实测三种拼法
+            全部失败，报 `'NoneType' object has no attribute 'constants'`）。
+            每段在 bcdec 之后本身就是一份完整 dump，必须**逐段反编译、
+            再拼接 lua 文本**。原因见下面 bcdec() 的注释。
 """
 
 from __future__ import annotations
@@ -78,7 +83,13 @@ def bcdec(data: bytes, timeout: int = 120) -> bytes:
     """bcdec：魔改 LuaJIT 字节码 → 标准 LuaJIT 字节码。
 
     走 stdin/stdout，不落盘 —— sharecfgdata 有几百个片段，落盘会让 IO 变瓶颈。
-    输出前后各有一个字节的包装（与 azex 的 trim_output 一致）。
+
+    输入输出**都**是完整的 BC dump，头尾不要动：
+        输入：`\\x1bLJ\\x02\\x02` + uleb128(proto 长度) + proto + `\\x00`
+        输出：同长度、同为完整 dump（实测 2422/2422 段都以 `1b 4c 4a 02 02`
+              开头、以 `00` 结尾）
+    早先这里按 `out[5:-1]` 剥掉头尾再拼字节码，是错的：ljd 拿到没有头的
+    字节流只会报 `'NoneType' object has no attribute 'constants'`。
     """
     proc = subprocess.run(
         [str(_tool("bcdec"))], input=data, stdout=subprocess.PIPE,
@@ -88,8 +99,10 @@ def bcdec(data: bytes, timeout: int = 120) -> bytes:
         raise RuntimeError(f"bcdec 失败({proc.returncode}): "
                            f"{proc.stderr.decode('u8', 'replace')[:200]}")
     out = proc.stdout
-    # 首 5 字节 + 尾 1 字节是容器包装，与 azex bcdec_pipe(trim_output=True) 一致
-    return out[5:-1] if len(out) > 6 else out
+    if not out.startswith(LJ_HEADER):
+        # 不抛错：万一将来 bcdec 改成裸字节码输出，让 ljd 的报错来说话更有信息量
+        warn(f"bcdec 输出不是以 LJ 头开头（前 8 字节 {out[:8].hex(' ')}），照原样交给 ljd")
+    return out
 
 
 def decompile(bytecode: bytes) -> str:
@@ -143,17 +156,21 @@ def iter_segments(data: bytes):
 
 
 def unpack_sharecfgdata(bundle: Path, cache: Path) -> str:
-    """一个 sharecfgdata bundle → lua 源码。"""
+    """一个 sharecfgdata bundle → lua 源码。
+
+    每段 bcdec 之后都是**独立完整**的 BC dump，所以逐段反编译、再拼文本。
+    不要先拼字节码再一次性反编译（实测必失败，见模块 docstring 的验证状态）。
+    """
     key = hashlib.md5(bundle.read_bytes()).hexdigest()
     hit = cache / f"{key}.lua"
     if hit.exists():
         return hit.read_text("utf-8")
 
     raw = bundle.read_bytes()
-    parts = [bcdec(seg) for seg in iter_segments(raw)]
-    if not parts:
+    texts = [decompile(bcdec(seg)) for seg in iter_segments(raw)]
+    if not texts:
         raise ValueError(f"{bundle.name}: 切分出 0 个片段")
-    text = decompile(b"".join(parts))
+    text = "\n".join(texts)
     cache.mkdir(parents=True, exist_ok=True)
     hit.write_text(text, encoding="utf-8")
     return text

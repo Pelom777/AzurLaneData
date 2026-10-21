@@ -45,11 +45,20 @@ bundle 文件
   = [uleb128 长度][LuaJIT 字节码]  × N        ← 自定义容器，不是 UnityFS
        ↓ 每段前面补 b"\x1bLJ\x02\x02"，后面补 b"\x00"
   一段合法的 LuaJIT BC dump
-       ↓ tools/bcdec（stdin/stdout，砍掉首 5 字节尾 1 字节）
+       ↓ tools/bcdec（stdin/stdout，输出仍是完整 dump，头尾不要剥）
   标准 LuaJIT 字节码
-       ↓ 全部拼接后一次 ljd.tools.process_bytes()
+       ↓ 逐段 ljd.tools.process_bytes()，再拼接 lua 文本
   lua 源码  →  scripts/luatable.py 解析  →  <表名>.json
 ```
+
+> **实测修正（2026-10-21，CN 9.7.398）**：原文写的是"全部拼接后一次 `ljd`"，
+> 这条对 `sharecfgdata` **是错的**。每段 `bcdec` 之后本身就是一份**完整**的
+> BC dump（实测 2422/2422 段都以 `1b 4c 4a 02 02` 开头、`00` 结尾），必须
+> **逐段反编译再拼文本**。三种拼接字节码的写法全部失败，报
+> `'NoneType' object has no attribute 'constants'`。同理 `bcdec` 的输出不要按
+> `out[5:-1]` 剥头尾 —— 剥了 ljd 就无头可读。证据：`scripts/p0_probe.py` 的
+> report（H1/H2 通过，H3/H4/H5 全挂，H6 生产路径通过）。
+
 
 **分段逻辑已实测**：`barrage_template_2` 切出 219 段，`idx` 正好走到文件末尾，
 无越界无残留。参考实现是 `AzurLaneExtractor` 的
@@ -367,8 +376,8 @@ python scripts/check_data_contract.py --data public/data
 | 32 位 ELF 缺解释器 | `No such file or directory`（文件明明在） | 装 `libc6:i386` |
 | `sharecfgdata` 误用 UnityPy | `UnityPy.load` 抛异常 / 0 objects | 它就不是 UnityFS，走 uleb128 分段 |
 | `scripts32` 忘了 uabdec | UnityPy 也打不开，头不是 `UnityFS` | 先 `uabdec` |
-| 反编译全局拼接方式 | 每段单独反编译会丢跨段引用 | 与官方一致：**全部拼接后一次反编译** |
-| `bcdec` 输出首尾包装 | 前 5 字节 + 尾 1 字节是容器 | `out[5:-1]` |
+| 反编译拼接方式 | 拼字节码再一次性反编译会失败 | **实测反之**：`sharecfgdata` 每段都是完整 dump，逐段反编译再拼文本（见 §3 修正） |
+| `bcdec` 输出首尾包装 | 前 5 字节 + 尾 1 字节是容器 | **实测反之**：输出就是完整 dump，`out[5:-1]` 会把头剥掉导致 ljd 报 `constants` 错 |
 | `actions/cache` 是仓库级 | 换仓库后 state 清零 → 全量重下 | `azl_assets.py --seed` |
 | 资产误提交 | `git add -A` 把未落盘的资产当删除 | 只用 `commit.py --paths` |
 
