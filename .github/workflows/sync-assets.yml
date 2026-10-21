@@ -95,7 +95,9 @@ jobs:
         run: |
           mkdir -p .azl
           # 桶不存在会在这里失败，提示先建桶；桶为空则正常返回空文件
-          if ! rclone lsf "r2:${{ secrets.R2_BUCKET }}" --files-only > .azl/remote.lst; then
+          # --recursive 不能省：rclone lsf 默认只列一层，而产物全在 <item>/ 子目录下，
+          # 不加这句列出来永远是空的，mark_remote 会静默失效（已踩过）。
+          if ! rclone lsf "r2:${{ secrets.R2_BUCKET }}" --files-only --recursive > .azl/remote.lst; then
             echo "::error::读不到桶 ${{ secrets.R2_BUCKET }}。先按 docs/CDN.md §4.0 建桶，"
             echo "::error::并确认 token 有 Object Read & Write 权限。"
             exit 1
@@ -133,9 +135,13 @@ jobs:
           # 用 copy 不用 sync：sync 会删掉远端多余对象，而 spine 是手工搬进去的，
           # 不在任何一次生成的清单里，会被一并删掉。
           # --ignore-times：清单已经是精确变更集，不需要 rclone 再逐个比对。
+          # --s3-no-check-bucket：R2 对受限 token 的 HeadBucket 会返回 403，
+          # rclone 会误判成"桶不存在"进而尝试 CreateBucket，同样 403 后整体失败。
+          # 桶是手工建的，不需要 rclone 去探测或创建。
           rclone copy public "r2:${{ secrets.R2_BUCKET }}" \
             --files-from .azl/upload.lst \
             --ignore-times \
+            --s3-no-check-bucket \
             --transfers 16 --checkers 32 \
             --header-upload "Cache-Control: public, max-age=86400" \
             --stats 15s --stats-one-line

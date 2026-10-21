@@ -163,7 +163,7 @@ python scripts/azl_assets.py --server CN \
 ```bash
 rclone copy public r2:azurlane-assets \
   --exclude "data/**" \
-  --transfers 16 --checkers 32 -P \
+  --s3-no-check-bucket --transfers 16 --checkers 32 -P \
   --header-upload "Cache-Control: public, max-age=86400"
 ```
 
@@ -243,7 +243,7 @@ painting/<name>/<name>.json      ← painting 的 marker 是 json，不是 png
 
 ```bash
 # 0. 拉远端清单（桶为空时是空文件，不算失败）
-rclone lsf r2:azurlane-assets --files-only > .azl/remote.lst
+rclone lsf r2:azurlane-assets --files-only --recursive > .azl/remote.lst
 
 # 1. 补 marker，让增量判据在干净工作区成立
 python scripts/mark_remote.py --listing .azl/remote.lst --public public
@@ -264,7 +264,7 @@ tr '\0' '\n' < .azl/written.list | sed 's|^public/||' | sed '/^$/d' > .azl/uploa
 # 4. 只推这次写出的，不做远端比对
 rclone copy public r2:azurlane-assets \
   --files-from .azl/upload.lst \
-  --ignore-times --transfers 16 --checkers 32 \
+  --ignore-times --s3-no-check-bucket --transfers 16 --checkers 32 \
   --header-upload "Cache-Control: public, max-age=86400"
 ```
 
