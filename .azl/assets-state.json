@@ -1,0 +1,22 @@
+{
+ "items": {
+  "CN": {
+   "squareicon:squareicon/22:-": "e510ce213851fe722d87923ac8f997a1",
+   "squareicon:squareicon/33:-": "01887851ac96e2becb6f036bb921e1a0"
+  }
+ },
+ "version": {
+  "CN": {
+   "az": "9.7.398",
+   "bgm": "0.0.1300",
+   "cipher": "0.0.1304",
+   "cv": "0.0.1481",
+   "dorm": "0.0.1551",
+   "l2d": "0.0.1590",
+   "manga": "0.0.1342",
+   "map": "0.0.333",
+   "painting": "0.0.1802",
+   "pic": "0.0.1312"
+  }
+ }
+}
