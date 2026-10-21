@@ -1,0 +1,125 @@
+name: stage1-verify
+
+# 阶段 1 验收专用（临时）：
+#   1. 全量解包 → build_data → check_data_contract
+#   2. 同一版本用旧链路（legacy/fetch_lua_tables.py）再跑一遍
+#   3. 比两份 public/data 产物 —— 这是判断"自解包和 LuaScripts 是否等价"的唯一可靠办法
+#
+# 证据归档到 stage1-artifacts 分支。
+
+on:
+  push:
+    paths:
+      - ".github/workflows/stage1-verify.yml"
+      - "scripts/stage1_report.py"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    # 反编译 32 张表 + 39 MB 的 scripts32，比 P0 重得多，给足时间
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 工具链
+        run: chmod +x tools/bcdec tools/uabdec && file tools/bcdec
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install -q --upgrade pip
+          python -m pip install -q -r requirements.txt
+
+      - name: 全量解包（新链路）
+        id: unpack
+        continue-on-error: true
+        run: |
+          mkdir -p stage1
+          python scripts/unpack_lua.py --server CN --out raw_new --work work --cache .cache/lua \
+            2>&1 | tee stage1/unpack_new.log
+
+      - name: 拉旧链路（legacy，仅验收用）
+        id: legacy
+        continue-on-error: true
+        run: |
+          PYTHONPATH=scripts python scripts/legacy/fetch_lua_tables.py \
+            --server CN --dst work/lua-up --out raw_old 2>&1 | tee stage1/unpack_old.log
+
+      - name: 以仓库现有数据为基线，分别构建两份
+        id: build
+        continue-on-error: true
+        run: |
+          # build_data_impl 的 ship-attr 是合并式的：推不出的字段（transform /
+          # gear_score）从 --out 目录里的旧文件保留。所以两个输出目录都要先用
+          # 仓库现有 public/data 播种，否则两边会一起退化成"字段不存在"。
+          mkdir -p out_new out_old
+          cp public/data/*.json out_new/
+          cp public/data/*.json out_old/
+          echo "--- 播种：out_new/out_old 各 $(ls out_new/*.json | wc -l) 个文件 ---"
+          python scripts/build_data.py --raw raw_new --out out_new 2>&1 | tee stage1/build_new.log
+          python scripts/build_data.py --raw raw_old --out out_old 2>&1 | tee stage1/build_old.log
+
+      - name: 契约校验（新链路产物）
+        id: contract
+        continue-on-error: true
+        run: python scripts/check_data_contract.py --data out_new 2>&1 | tee stage1/contract.log
+
+      - name: 字段级差异（新产物 vs 仓库）
+        id: diffrepo
+        continue-on-error: true
+        run: |
+          python scripts/check_data_diff.py --tables raw_new --data public/data \
+            2>&1 | tee stage1/diff_vs_repo.log
+
+      - name: 汇总报告
+        if: always()
+        run: |
+          python scripts/stage1_report.py \
+            --new out_new --old out_old --repo public/data \
+            --raw-new raw_new --raw-old raw_old \
+            --report stage1/report.json 2>&1 | tee stage1/summary.txt
+
+      - name: 摘要
+        if: always()
+        run: |
+          {
+            echo "## 阶段 1 验收"
+            echo ''
+            echo '```'
+            cat stage1/summary.txt 2>/dev/null || echo "没有摘要"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 归档证据
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git switch -c stage1-artifacts
+          # 只归档报告与日志，不归档 raw/new json（几十 MB，没必要进 git）
+          git add -f stage1
+          if git diff --cached --quiet; then
+            echo "没有可提交的证据"
+          else
+            git commit -m "stage1: 验收证据 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git push -f origin stage1-artifacts
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stage1-evidence
+          path: stage1/
+          if-no-files-found: warn
