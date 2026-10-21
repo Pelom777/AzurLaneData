@@ -9,10 +9,17 @@
 # ubuntu runner 上没有，得额外 apt install libgl1。azl_assets 只用
 # cvtColor / flip / 切片，全程不碰 GUI，headless 完全够（import 名同样是 cv2）。
 #
-# numpy 显式锁定：opencv 5 的 wheel 声明 numpy>=2 但没写上限，
-# 主版本漂移会让 cvtColor 的 dtype 行为变化。这里和本地实测值对齐。
+# numpy 显式锁定：opencv 5 的 wheel 只声明 numpy>=2 且没写上限，
+# 主版本漂移会让 dtype 行为变化。
+#
+# 为什么是 2.4.6 而不是最新的 2.5.x：numpy 2.5 把 Requires-Python 提到了
+# **>=3.12**，而 workflow 统一用 3.11（数据链路在 3.11 上已验收，不动）。
+# 2.4.6 是最后一个支持 3.11 的版本。
+# 实测两个版本对同一张立绘的产物 md5 完全一致（f42081cd…），所以降版本不影响输出。
+#
+# opencv 的 wheel 是 cp37-abi3，任何 3.7+ 都能装，不受 3.11 限制。
 
 UnityPy==1.25.4
 ljd @ https://github.com/AzurLaneTools/ljd/releases/download/wheel/ljd-0.1.7-py3-none-any.whl
-numpy==2.5.4
+numpy==2.4.6
 opencv-python-headless==5.0.0.93
