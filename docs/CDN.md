@@ -239,6 +239,16 @@ painting/<name>/<name>.json      ← painting 的 marker 是 json，不是 png
 <item>/<name>.png                ← 其余类别
 ```
 
+**两个 rclone 参数不能省，都是实测踩出来的（2026-10-21）：**
+
+| 参数 | 省了会怎样 |
+|---|---|
+| `lsf` 的 `--recursive` | `rclone lsf` 默认**只列一层**。产物全在 `<item>/` 子目录下，清单恒为空 → marker 永远补 0 个 → §5.2 的解法**静默失效**，CI 照旧全量重跑。表现是日志里「远端已有 0 个对象」，而桶里明明有东西。 |
+| `copy` 的 `--s3-no-check-bucket` | R2 对**限定单桶的 token** 的 `HeadBucket` 返回 403，rclone 误判「桶不存在」→ 尝试 `CreateBucket` → 同样 403 → 报 `S3: CreateBucket ... AccessDenied`。桶是手工建的，不需要它探测或创建。 |
+
+同一条 token 的权限边界（实测）：`ListObjectsV2` 可以，`ListBuckets`（`rclone lsd r2:`）和
+`GetBucketVersioning` 是 403 —— 都是正常的，前者是限定单桶，后者 rclone 只是打个警告。
+
 ### 5.3 完整流程（workflow 实际执行的顺序）
 
 ```bash
@@ -329,9 +339,11 @@ r2.dev 因为没有 Cache 规则，实际上只看对象上的 `Cache-Control` �
 
 | 缺口 | 状态 |
 |---|---|
-| `requirements.txt` 缺 opencv | ✅ 已补 `opencv-python-headless==5.0.0.93` + `numpy==2.5.4` |
+| `requirements.txt` 缺 opencv | ✅ 已补 `opencv-python-headless==5.0.0.93`；numpy 锁 `2.4.6`（2.5.x 要 Python ≥3.12，CI 是 3.11） |
 | `.azl/` 没被 gitignore | ✅ 已加规则，state 仍进 git |
 | CI 空工作区导致全量重跑 | ✅ 用 `scripts/mark_remote.py` 补 marker 解决，见 §5.2 |
+| `rclone lsf` 缺 `--recursive` 使上面那条失效 | ✅ 已修（2026-10-21 实测发现），见 §5.2 |
+| R2 受限 token 触发 `CreateBucket` 403 | ✅ 已加 `--s3-no-check-bucket` |
 | `spine` 无法自动 | ⚠️ 已决定：旧仓库搬一次，前端加 fallback |
 | `HANDOFF.md` 写着"已支持 spine" | ⚠️ 表述有误，实际不支持 |
 
