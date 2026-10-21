@@ -1,0 +1,228 @@
+{
+  "raw_new": {
+    "table_count": 36,
+    "tables": {
+      "sharecfgdata": {
+        "ship_data_statistics": true,
+        "ship_data_template": true,
+        "ship_skin_template": true
+      },
+      "scripts32": {
+        "ship_data_strengthen": true,
+        "ship_data_trans": true,
+        "transform_data_template": true,
+        "attribute_info_by_type": true
+      }
+    },
+    "missing_required": [],
+    "entries": {
+      "activity_coloring_template": 119,
+      "aircraft_template": 7564,
+      "attribute_info_by_type": 13,
+      "barrage_template_1": 26914,
+      "barrage_template_2": 219,
+      "barrage_template_3": 903,
+      "bullet_template_1": 19125,
+      "bullet_template_2": 229,
+      "bullet_template_3": 1277,
+      "chapter_template": 1070,
+      "chapter_template_loop": 941,
+      "enemy_data_statistics": 14133,
+      "equip_data_statistics": 10703,
+      "equip_data_template": 9470,
+      "expedition_data_template": 16133,
+      "gametip": 8024,
+      "item_data_statistics": 3216,
+      "item_virtual_data_statistics": 4488,
+      "ship_data_breakout": 3483,
+      "ship_data_statistics": 4123,
+      "ship_data_strengthen": 863,
+      "ship_data_template": 3972,
+      "ship_data_trans": 110,
+      "ship_skin_template": 2871,
+      "ship_skin_words": 2607,
+      "shop_template": 2624,
+      "spweapon_data_statistics": 2839,
+      "task_data_template": 9137,
+      "transform_data_template": 1254,
+      "weapon_name": 2422,
+      "weapon_property_1": 53619,
+      "weapon_property_2": 1514,
+      "weapon_property_3": 1252,
+      "world_chapter_template": 716,
+      "world_effect_data": 12400,
+      "world_event_data": 5803
+    },
+    "total_bytes": 103574404
+  },
+  "raw_old": {
+    "table_count": 39,
+    "only_in_new": [],
+    "only_in_old": [
+      "barrage_template",
+      "bullet_template",
+      "weapon_property"
+    ]
+  },
+  "new_vs_old": {
+    "label": "新链路 vs 旧链路",
+    "files_new": 21,
+    "files_old": 21,
+    "only_in_new": [],
+    "only_in_old": [],
+    "identical": [
+      "2017-cn.json",
+      "2017-jp.json",
+      "2019-cn.json",
+      "2019-en.json",
+      "2019-jp.json",
+      "2021-cn.json",
+      "2021-en.json",
+      "2021-jp.json",
+      "bgm.json",
+      "cg.json",
+      "equip.json",
+      "exp.json",
+      "new.json",
+      "nickname.json",
+      "option.json",
+      "server.json",
+      "ship-attr.json",
+      "ship-equip.json",
+      "ship.json",
+      "skin.json",
+      "vote.json"
+    ],
+    "differing": [],
+    "detail": {},
+    "equivalent": true
+  },
+  "new_vs_repo": {
+    "label": "本次产出 vs 仓库现有",
+    "files_new": 21,
+    "files_old": 21,
+    "only_in_new": [],
+    "only_in_old": [],
+    "identical": [
+      "2017-cn.json",
+      "2017-jp.json",
+      "2019-cn.json",
+      "2019-en.json",
+      "2019-jp.json",
+      "2021-cn.json",
+      "2021-en.json",
+      "2021-jp.json",
+      "bgm.json",
+      "cg.json",
+      "equip.json",
+      "exp.json",
+      "new.json",
+      "nickname.json",
+      "option.json",
+      "server.json",
+      "ship-equip.json",
+      "vote.json"
+    ],
+    "differing": [
+      "ship-attr.json",
+      "ship.json",
+      "skin.json"
+    ],
+    "detail": {
+      "ship-attr.json": {
+        "size_new": 163033,
+        "size_old": 144414,
+        "only_in_new": [
+          "2b",
+          "a2",
+          "aerbeituo",
+          "aila",
+          "aluomangshi",
+          "anninvwang",
+          "antu",
+          "baifeng",
+          "baofengyu",
+          "bawu"
+        ],
+        "only_in_old": [],
+        "key_count_new": 897,
+        "key_count_old": 789,
+        "changed_keys": 36,
+        "changed_sample": [
+          "balaka",
+          "dafenqi",
+          "daqinghuayu",
+          "daqinghuayu_idol",
+          "feiyu",
+          "i13",
+          "i168",
+          "i19",
+          "i25",
+          "i26"
+        ]
+      },
+      "ship.json": {
+        "size_new": 101554,
+        "size_old": 88925,
+        "only_in_new": [
+          "2b",
+          "a2",
+          "aerbeituo",
+          "aila",
+          "aluomangshi",
+          "anninvwang",
+          "antu",
+          "baifeng",
+          "baofengyu",
+          "bawu"
+        ],
+        "only_in_old": [],
+        "key_count_new": 897,
+        "key_count_old": 789,
+        "changed_keys": 2,
+        "changed_sample": [
+          "huangjiacaifu",
+          "siwangzhuzai"
+        ]
+      },
+      "skin.json": {
+        "size_new": 214800,
+        "size_old": 185159,
+        "only_in_new": [
+          "2b",
+          "a2",
+          "aerbeituo",
+          "aila",
+          "aluomangshi",
+          "anninvwang",
+          "antu",
+          "baifeng",
+          "baofengyu",
+          "bawu"
+        ],
+        "only_in_old": [
+          "gulite_robot1",
+          "gulite_robot3",
+          "gulite_robot4"
+        ],
+        "key_count_new": 897,
+        "key_count_old": 792,
+        "changed_keys": 121,
+        "changed_sample": [
+          "adaerbote",
+          "aerjiliya",
+          "aersasi",
+          "afuleer",
+          "aierdeliqi",
+          "aifosen",
+          "aimierbeierding",
+          "aimudeng",
+          "aisaikesi",
+          "alabama"
+        ]
+      }
+    },
+    "equivalent": false
+  },
+  "verdict": "pass"
+}

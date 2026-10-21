@@ -1,0 +1,8 @@
+[azl] ship       897 艘
+[azl] skin       897 艘 / 2491 个形态（单船最多 16）
+[azl] ship-attr  897 艘，101 艘有 transform，101 艘有 gear_score
+[azl] 键集对齐   ship=897 skin=897 ship-attr=897（skin 多 0）
+::warning::2017-cn.json 是空文件
+::warning::2019-en.json 是空文件
+::warning::2019-jp.json 是空文件
+[azl] 全部通过

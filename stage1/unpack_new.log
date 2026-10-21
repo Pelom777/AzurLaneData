@@ -1,0 +1,42 @@
+[azl] 连接登录服 line1-login-bili-blhx.bilibiligame.net:80
+[azl] az 清单 64649 条
+[azl] sharecfgdata 待解 32 个
+[azl]   activity_coloring_template: 1 表 / 119 条
+[azl]   aircraft_template: 1 表 / 7564 条
+[azl]   barrage_template_1: 1 表 / 26914 条
+[azl]   barrage_template_2: 1 表 / 219 条
+[azl]   barrage_template_3: 1 表 / 903 条
+[azl]   bullet_template_1: 1 表 / 19125 条
+[azl]   bullet_template_2: 1 表 / 229 条
+[azl]   bullet_template_3: 1 表 / 1277 条
+[azl]   chapter_template: 1 表 / 1070 条
+[azl]   chapter_template_loop: 1 表 / 941 条
+[azl]   enemy_data_statistics: 1 表 / 14133 条
+[azl]   equip_data_statistics: 1 表 / 10703 条
+[azl]   equip_data_template: 1 表 / 9470 条
+[azl]   expedition_data_template: 1 表 / 16133 条
+[azl]   gametip: 1 表 / 8024 条
+[azl]   item_data_statistics: 1 表 / 3216 条
+[azl]   item_virtual_data_statistics: 1 表 / 4488 条
+[azl]   ship_data_breakout: 1 表 / 3483 条
+[azl]   ship_data_statistics: 1 表 / 4123 条
+[azl]   ship_data_template: 1 表 / 3972 条
+[azl]   ship_skin_template: 1 表 / 2871 条
+[azl]   ship_skin_words: 1 表 / 2607 条
+[azl]   shop_template: 1 表 / 2624 条
+[azl]   spweapon_data_statistics: 1 表 / 2839 条
+[azl]   task_data_template: 1 表 / 9137 条
+[azl]   weapon_name: 1 表 / 2422 条
+[azl]   weapon_property_1: 1 表 / 53619 条
+[azl]   weapon_property_2: 1 表 / 1514 条
+[azl]   weapon_property_3: 1 表 / 1252 条
+[azl]   world_chapter_template: 1 表 / 716 条
+[azl]   world_effect_data: 1 表 / 12400 条
+[azl]   world_event_data: 1 表 / 5803 条
+[azl] 下载 scripts32（39.7 MB）
+[azl] uabdec 解密 scripts32（约 40 MB）
+[azl]   sharecfg/ship_data_trans: 110 条
+[azl]   sharecfg/attribute_info_by_type: 13 条
+[azl]   sharecfg/ship_data_strengthen: 863 条
+[azl]   sharecfg/transform_data_template: 1254 条
+[azl] 共 36 张表 / 236150 条记录 / 耗时 1187.3s

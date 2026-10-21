@@ -1,0 +1,4 @@
+[azl] 初始化 lua 缓存：/home/runner/work/AzurLaneData/AzurLaneData/work/lua-up
+[azl] lua 源 commit 5822b089（2026-10-17T02:42:55Z）
+[azl] 解析 39/39 个表，335902 条记录，130.2 MB，耗时 41.5s
+[azl] 以下表在尾部遇到非数据语句，已截断保留数据部分：weapon_property.lua, ship_data_strengthen.lua, attribute_info_by_type.lua, ship_data_trans.lua, transform_data_template.lua

@@ -1,0 +1,32 @@
+[azl] == ship
+[azl]    我 897 | 仓库 789 | 交集 789 | 仓库有我无 0 | 我有仓库无 108
+[azl]    交集内完全一致 787/789（99.7%）
+[azl]    我独有（多为仓库快照之后新增）: ['2b', 'a2', 'aerbeituo', 'aila', 'aluomangshi', 'anninvwang']
+[azl]    差异[type] 1 处
+[azl]       huangjiacaifu: {'type': (23, 22)}
+[azl]    差异[name] 1 处
+[azl]       siwangzhuzai: {'name': ('死亡主宰', 'DEAD MASTER')}
+
+[azl] == skin
+[azl]    我 897 | 仓库 792 | 交集 789 | 仓库有我无 3 | 我有仓库无 108
+[azl]    交集内完全一致 668/789（84.7%）
+[azl]    仓库独有（多为旧版有、现已被游戏删除）: ['gulite_robot1', 'gulite_robot3', 'gulite_robot4']
+[azl]    我独有（多为仓库快照之后新增）: ['2b', 'a2', 'aerbeituo', 'aila', 'aluomangshi', 'anninvwang']
+[azl]    差异[inner] 121 处
+[azl]       adaerbote: {'我多': ['adaerbote_4'], '仓库多': [], '内容不同': []}
+[azl]       aerjiliya: {'我多': ['aerjiliya_4'], '仓库多': [], '内容不同': []}
+[azl]       aersasi: {'我多': ['aersasi_3'], '仓库多': [], '内容不同': []}
+
+[azl] == option
+[azl]    我 3 | 仓库 3 | 交集 3 | 仓库有我无 0 | 我有仓库无 0
+[azl]    交集内完全一致 3/3（100.0%）
+
+[azl] == ship-attr
+[azl]    我 897 | 仓库 789 | 交集 789 | 仓库有我无 0 | 我有仓库无 108
+[azl]    交集内完全一致 753/789（95.4%）
+[azl]    我独有（多为仓库快照之后新增）: ['2b', 'a2', 'aerbeituo', 'aila', 'aluomangshi', 'anninvwang']
+[azl]    差异[base] 36 处
+[azl]       balaka: {'base': ([678, 20, 254, 0, 0, 37, 8, 62, 7, 18, 19, 0], [678, 20, 254, 0, 0, 37, 7, 62, 7, 18, 19, 0])}
+[azl]       dafenqi: {'base': ([678, 22, 258, 0, 0, 37, 8, 66, 7, 18, 57, 0], [678, 22, 258, 0, 0, 37, 7, 66, 7, 18, 57, 0])}
+[azl]       daqinghuayu: {'base': ([764, 28, 252, 0, 0, 35, 8, 66, 9, 16.8, 79, 0], [764, 28, 252, 0, 0, 35, 7, 66, 9, 16.8, 79, 0])}
+
