@@ -1,0 +1,111 @@
+{
+  "server": "CN",
+  "table": "weapon_name",
+  "steps": [],
+  "azhash": "azhash$9$7$398$def4c26318af25f3",
+  "listing_entries": 64649,
+  "bundle": {
+    "size": 208532,
+    "md5": "ee668bc95362b504c58881755224e052",
+    "md5_matches_listing": true,
+    "segments": 2422,
+    "cursor_end": 208532,
+    "coverage_exact": true,
+    "head_hex": "60 03 03 00 00 01 05 08"
+  },
+  "bcdec_sample": {
+    "rc": 0,
+    "in_len": 103,
+    "out_len": 103,
+    "out_head": "1b 4c 4a 02 02 60 00 00",
+    "out_tail": "a0 8d 06 00",
+    "starts_with_lj": true,
+    "ends_with_nul": true,
+    "stderr": "",
+    "seconds": 0.001
+  },
+  "bcdec": {
+    "segments_decoded": 2422,
+    "failures": 0,
+    "failure_sample": [],
+    "seconds": 1.0,
+    "all_start_with_lj": true,
+    "all_end_with_nul": true,
+    "total_out_bytes": 223064
+  },
+  "hypotheses": {
+    "H1_per_segment_full_dump": {
+      "ok": true,
+      "segments_tried": 2422,
+      "segments_ok": 2422,
+      "segments_failed": 0,
+      "error_sample": [],
+      "lua_len": 154130,
+      "partial": false,
+      "seconds": 2.3,
+      "tables": 1,
+      "entries": 2422,
+      "names": [
+        "weapon_name"
+      ],
+      "truncated": false
+    },
+    "H2_per_segment_rewrap": {
+      "ok": true,
+      "segments_tried": 2422,
+      "segments_ok": 2422,
+      "segments_failed": 0,
+      "error_sample": [],
+      "lua_len": 154130,
+      "partial": false,
+      "seconds": 2.3,
+      "tables": 1,
+      "entries": 2422,
+      "names": [
+        "weapon_name"
+      ],
+      "truncated": false
+    },
+    "H3_concat_raw": {
+      "ok": false,
+      "error": "AttributeError: 'NoneType' object has no attribute 'constants'",
+      "seconds": 0.0
+    },
+    "H4_concat_payload_with_header": {
+      "ok": false,
+      "error": "AttributeError: 'NoneType' object has no attribute 'constants'",
+      "seconds": 0.08
+    },
+    "H5_concat_payload_no_header": {
+      "ok": false,
+      "error": "AttributeError: 'NoneType' object has no attribute 'constants'",
+      "seconds": 0.0
+    },
+    "H6_production_unpack_lua": {
+      "ok": true,
+      "lua_len": 156551,
+      "seconds": 3.7,
+      "tables": 1,
+      "entries": 2422,
+      "names": [
+        "weapon_name"
+      ],
+      "truncated": false
+    }
+  },
+  "best": "H6_production_unpack_lua",
+  "fixture_compare": {
+    "compared": true,
+    "table": "weapon_name",
+    "fixture_entries": 2422,
+    "actual_entries": 2422,
+    "only_in_fixture": [],
+    "only_in_actual": [],
+    "id_diff_count": 0,
+    "value_mismatch_count": 0,
+    "value_mismatch_sample": [],
+    "identical": true
+  },
+  "verdict": "pass",
+  "total_seconds": 11.4
+}
