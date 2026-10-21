@@ -1,8 +1,18 @@
-"""维护 new.json —— 记录每条船 / 每个皮肤的首次出现时间。
+"""维护新增台账，并输出前端要的 new.json。
 
-为什么要单独一个文件：
-    ship.json / skin.json 每次都是全量覆盖，看不出"哪个是这周新加的"。
-    前端要做「新船角标」「本次更新新增」这类展示，就需要一份显式的增量台账。
+**两个文件，职责不同，别混**：
+
+    data/new-ledger.json        累积台账（不进 public/）。{version, updated,
+                                baseline, ships{...}, skins{...}}，每条带 first_seen。
+    public/data/new.json        前端契约。{cg:[url], ship:[painting], skin:{皮肤:船}}
+                                首页 home/index.vue 直接读这三个字段渲染轮播和角标。
+
+为什么台账不能占 public/data/new.json 的名字：
+    前端首页把 new.json 当 {cg, ship, skin} 用（实测 src/views/home/index.vue），
+    台账形状 {ships:{}, skins:{}} 会让 info['cg'] / info['ship'] 变 undefined，
+    首页直接白。HANDOFF §8 原设计是"new.json 当台账 + new-latest.json 给前端"，
+    但前端读的是 new.json，改名的代价要落到前端改动上 —— 与"前端零改动"冲突。
+    所以台账让位，挪到仓库根的 data/ 下（构建期数据，不是站点资源）。
 
 为什么是累积台账而不是"只存本次"：
     只存本次的话，历史窗口一过就丢了；而且 CI 一旦漏跑一次，那批新增就永久丢失。
@@ -12,13 +22,13 @@
     台账自己就是判据 —— id 不在台账里就是新的。这样连 `git show HEAD:` 都不用，
     少一个失败面。
 
-首次运行（`--bootstrap`）：
-    仓库里没有台账时，不能把现有的 900 条全标成"今天新增"，否则前端会亮成一片。
+首次运行（台账文件不存在时自动建基线）：
+    不能把现有的 900 条全标成"今天新增"，否则前端会亮成一片。
     所以首次只建基线：写入全部 id，但 `first_seen` 留空，表示"早于台账起点"。
+    同时 **保留旧 new.json 里的 cg / ship / skin 原值**，不把首页清空。
 
 用法：
-    python scripts/track_new.py --data public/data            # 首次：建基线
-    python scripts/track_new.py --data public/data --bootstrap
+    python scripts/track_new.py --data public/data            # 首次：自动建基线
     python scripts/track_new.py --data public/data --version 9.7.398
 """
 
@@ -34,7 +44,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import append_summary, log, set_output, warn  # noqa: E402
 
-LEDGER = "new.json"
+LEDGER = "new.json"                     # 前端契约文件（在 --data 目录下）
+LEDGER_DEFAULT = (Path(__file__).resolve().parent.parent
+                  / "data" / "new-ledger.json")   # 累积台账（仓库根 data/）
 
 
 def load(path: Path):
@@ -58,6 +70,8 @@ def main() -> int:
                     help="首次建基线：只记 id，不标首次出现时间")
     ap.add_argument("--keep-days", type=int, default=0,
                     help="只保留最近 N 天的条目（0 = 全留）")
+    ap.add_argument("--ledger", default=str(LEDGER_DEFAULT),
+                    help="累积台账路径，默认仓库根 data/new-ledger.json")
     args = ap.parse_args()
 
     data = Path(args.data).resolve()
@@ -67,7 +81,11 @@ def main() -> int:
         warn("ship.json 为空，跳过台账更新")
         return 0
 
-    ledger_path = data / LEDGER
+    # 前端契约：先读旧的 new.json，cg 这类人工维护字段要原样保留
+    front_path = data / LEDGER
+    front_old = load(front_path)
+
+    ledger_path = Path(args.ledger).resolve()
     ledger = load(ledger_path)
     known_ships: dict = ledger.get("ships") or {}
     known_skins: dict = ledger.get("skins") or {}
@@ -129,9 +147,23 @@ def main() -> int:
         "ships": dict(sorted(known_ships.items())),
         "skins": dict(sorted(known_skins.items())),
     }
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
     ledger_path.write_text(
         json.dumps(out, ensure_ascii=False, indent=1, sort_keys=False) + "\n",
         encoding="utf-8")
+
+    # ---- 前端契约 new.json：{cg, ship, skin}（首页 home/index.vue 直接读这三个键）
+    # cg 是人工维护的轮播图，任何情况下都原样保留。
+    cg = front_old.get("cg") or []
+    if baseline:
+        # 建基线这一轮没有"新增"，沿用旧值 —— 否则首页的角标区会突然清空
+        ship_list = front_old.get("ship") or []
+        skin_map = front_old.get("skin") or {}
+    else:
+        ship_list = new_ships
+        skin_map = {k: known_skins[k]["ship"] for k in new_skins}
+    front = {"cg": cg, "ship": ship_list, "skin": skin_map}
+    front_path.write_text(json.dumps(front, ensure_ascii=False) + "\n", encoding="utf-8")
 
     latest = {
         "version": args.version or ledger.get("version", ""),

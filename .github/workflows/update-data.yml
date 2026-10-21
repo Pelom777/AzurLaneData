@@ -21,6 +21,10 @@ on:
         description: "忽略版本比对，强制全量重解"
         default: false
         type: boolean
+      dry_run:
+        description: "只跑不提交（验证用）"
+        default: false
+        type: boolean
 
 concurrency:
   group: update-data
@@ -112,10 +116,10 @@ jobs:
       # 只有契约校验真的跑过且通过才提交：
       # 没变化的小时里 contract 是 skipped，就不会产生空提交。
       - name: 提交
-        if: steps.contract.outcome == 'success'
+        if: steps.contract.outcome == 'success' && inputs.dry_run != true
         run: |
           python scripts/commit.py \
-            --paths public/data data/version.json \
+            --paths public/data data/version.json data/new-ledger.json \
             --message "data: ${{ env.SERVER }} ${{ steps.ver.outputs.version }}"
 
       - name: 摘要

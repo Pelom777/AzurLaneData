@@ -181,7 +181,8 @@ AzurLaneData/
 │   ├── bcdec / uabdec           # 32 位 x86 ELF，见 tools/README.md
 │   └── README.md
 ├── data/
-│   └── version.json             # {服务器: {az, version, checked_at}}
+│   ├── version.json             # {服务器: {az, version, checked_at}}
+│   └── new-ledger.json          # new.json 的累积台账（前端不读）
 ├── public/data/                 # ★ 产出：ship / skin / option / ship-attr / new.json
 └── .gitignore                   # 资产目录全部忽略
 ```
@@ -342,7 +343,21 @@ python scripts/check_data_contract.py --data public/data
 
 ## 8. new.json 设计
 
+> **实测修正（2026-10-21）**：下面这版把 `new.json` 当台账，**和前端冲突**。
+> 前端首页 `src/views/home/index.vue` 把 `new.json` 读成
+> `{cg:[图片url], ship:[painting], skin:{皮肤:船}}`（轮播 + 新增角标），
+> 台账形状会让 `info['cg']` 变成 undefined，首页直接白。
+> 所以实际实现是**拆成两个文件**：
+>
+> | 文件 | 形状 | 谁读 |
+> |---|---|---|
+> | `data/new-ledger.json` | 下面这个累积台账 | 只有 `track_new.py` |
+> | `public/data/new.json` | `{cg, ship, skin}`，前端契约 | 前端首页 |
+>
+> 建基线那一轮不会清空 `ship`/`skin`，而是原样保留旧值；只有真的算出新增才替换。
+
 ```jsonc
+// data/new-ledger.json —— 累积台账（不进 public/）
 {
   "version": "9.7.398",          // 最近一次记录的版本
   "updated": "2026-10-21T10:00:00Z",
@@ -356,7 +371,8 @@ python scripts/check_data_contract.py --data public/data
 }
 ```
 
-外加 `new-latest.json`，只装本次新增，供前端做「本次更新新增」提示。
+外加 `public/data/new-latest.json`，只装本次新增（`{version, updated, ships, skins}`），
+供日志/审计用；前端目前不读它。
 
 三个设计取舍：
 
