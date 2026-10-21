@@ -268,9 +268,9 @@ AzurLaneData/
 
 ```bash
 # 环境
-sudo apt install libc6:i386          # WSL / Linux；纯 Windows 请直接用 WSL
-pip install UnityPy
-pip install https://github.com/AzurLaneTools/ljd/releases/download/wheel/ljd-0.1.7-py3-none-any.whl
+pip install -r requirements.txt      # UnityPy + ljd（版本已锁定）
+chmod +x tools/bcdec tools/uabdec    # 静态 32 位 ELF，实测不需要 libc6:i386
+# 纯 Windows 跑不了 ELF：用 WSL，或者直接交给 CI（p0-probe.yml）
 
 # 只解一张最小的表
 python scripts/unpack_lua.py --server CN --out raw --work work --only weapon_name
@@ -373,7 +373,7 @@ python scripts/check_data_contract.py --data public/data
 
 | 坑 | 表现 | 处理 |
 |---|---|---|
-| 32 位 ELF 缺解释器 | `No such file or directory`（文件明明在） | 装 `libc6:i386` |
+| 32 位 ELF 缺解释器 | `No such file or directory`（文件明明在） | 只影响**动态**链接的 32 位 ELF；`tools/` 里这两个是静态的，实测不需要 i386 运行库 |
 | `sharecfgdata` 误用 UnityPy | `UnityPy.load` 抛异常 / 0 objects | 它就不是 UnityFS，走 uleb128 分段 |
 | `scripts32` 忘了 uabdec | UnityPy 也打不开，头不是 `UnityFS` | 先 `uabdec` |
 | 反编译拼接方式 | 拼字节码再一次性反编译会失败 | **实测反之**：`sharecfgdata` 每段都是完整 dump，逐段反编译再拼文本（见 §3 修正） |

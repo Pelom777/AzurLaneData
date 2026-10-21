@@ -2,6 +2,10 @@ name: update-data
 
 # 每小时检查一次版本；只有 azhash 变了才真正解包和构建。
 # 只 commit 数据 json（十几 MB），资产不进 git —— 原因见 docs/HANDOFF.md「容量」。
+#
+# 顺序是刻意的：先握手比版本（几百毫秒），没变就结束。
+# 反编译缓存放在版本比对之后，key 用 azhash 的时间戳，
+# 这样"没变化的小时"完全不会产生新的 cache 条目，也就不会把 10 GB 配额刷掉。
 
 on:
   schedule:
@@ -37,14 +41,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # bcdec / uabdec 是 32 位 x86 ELF，x86_64 runner 需要 i386 运行库。
-      # 没有这一步会报 "No such file or directory"（其实是 ELF 解释器缺失）。
-      - name: 安装 32 位运行库
+      # bcdec / uabdec 是**静态链接**的 32 位 i386 ELF（无 PT_INTERP），
+      # 实测在 ubuntu-24.04 上直接就能跑，不需要 libc6:i386。
+      # 原来那步 apt install 是多余的，删掉省 40 秒，也少一个失败点。
+      - name: 工具链
         run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libc6:i386
           chmod +x tools/bcdec tools/uabdec
+          tools/bcdec </dev/null >/dev/null 2>&1 || echo "bcdec 空输入返回 $? （正常）"
 
       - uses: actions/setup-python@v5
         with:
@@ -54,26 +57,27 @@ jobs:
       - name: 安装依赖
         run: |
           python -m pip install -q --upgrade pip
-          # ljd 是纯 Python 反编译器，官方以 wheel 形式放在 release 上
-          python -m pip install -q \
-            https://github.com/AzurLaneTools/ljd/releases/download/wheel/ljd-0.1.7-py3-none-any.whl
-          python -m pip install -q UnityPy
-
-      # 反编译是整个链路里最贵的一步（几十张表、上百 MB 字节码）。
-      # 缓存按内容 md5 命中，所以稳定期每小时实际上只重解 0~2 张表。
-      - name: 恢复反编译缓存
-        uses: actions/cache@v4
-        with:
-          path: .cache/lua
-          key: lua-${{ env.SERVER }}-${{ github.run_id }}
-          restore-keys: |
-            lua-${{ env.SERVER }}-
+          python -m pip install -q -r requirements.txt
 
       - name: 版本比对
         id: ver
         run: python scripts/check_version.py --server "$SERVER" --state data/version.json
 
+      # 反编译是整个链路里最贵的一步。缓存的 key 是 azhash 的时间戳：
+      #   - 版本没变：压根不走这一步（changed=false）
+      #   - 版本变了：restore-keys 前缀命中上一版，md5 没变的表直接读缓存
+      # 缓存内容按 bundle/TextAsset 的 md5 分文件，所以跨版本复用是安全的。
+      - name: 恢复反编译缓存
+        if: steps.ver.outputs.changed == 'true' || inputs.force
+        uses: actions/cache@v4
+        with:
+          path: .cache/lua
+          key: lua-${{ env.SERVER }}-${{ steps.ver.outputs.stamp }}
+          restore-keys: |
+            lua-${{ env.SERVER }}-
+
       - name: 解包 Lua 配置表
+        id: unpack
         if: steps.ver.outputs.changed == 'true' || inputs.force
         run: |
           python scripts/unpack_lua.py \
@@ -83,6 +87,7 @@ jobs:
             --cache .cache/lua
 
       - name: 构建 public/data
+        id: build
         if: steps.ver.outputs.changed == 'true' || inputs.force
         run: |
           python scripts/build_data.py --raw raw --out public/data
@@ -93,6 +98,7 @@ jobs:
         run: python scripts/check_data_contract.py --data public/data
 
       - name: 维护新增台账
+        id: track
         if: steps.ver.outputs.changed == 'true' || inputs.force
         run: |
           python scripts/track_new.py \
@@ -103,6 +109,8 @@ jobs:
         if: steps.ver.outputs.changed == 'true' || inputs.force
         run: python scripts/check_version.py --server "$SERVER" --state data/version.json --write
 
+      # 只有契约校验真的跑过且通过才提交：
+      # 没变化的小时里 contract 是 skipped，就不会产生空提交。
       - name: 提交
         if: steps.contract.outcome == 'success'
         run: |
@@ -117,6 +125,6 @@ jobs:
             echo "## 数据更新 · $SERVER"
             echo ""
             echo "- 版本：\`${{ steps.ver.outputs.version }}\`（变化：\`${{ steps.ver.outputs.changed }}\`）"
-            echo "- 表数：\`${{ steps.ver.outputs.tables || '-' }}\` 条数：\`${{ steps.ver.outputs.entries || '-' }}\`"
-            echo "- 新增：船 \`${{ steps.ver.outputs.new_ships || 0 }}\` 皮肤 \`${{ steps.ver.outputs.new_skins || 0 }}\`"
+            echo "- 解包：\`${{ steps.unpack.outputs.tables || '-' }}\` 张表 / \`${{ steps.unpack.outputs.entries || '-' }}\` 条 / 失败 \`${{ steps.unpack.outputs.failed || 0 }}\` / \`${{ steps.unpack.outputs.seconds || '-' }}\` 秒"
+            echo "- 新增：船 \`${{ steps.track.outputs.new_ships || 0 }}\` 皮肤 \`${{ steps.track.outputs.new_skins || 0 }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

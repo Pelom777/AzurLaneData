@@ -9,14 +9,19 @@
 | `bcdec` | 还原被魔改的 LuaJIT 字节码 | stdin（补过 LJ 头的 BC）→ stdout（标准 BC） |
 | `uabdec` | 解密整包加密的 UnityFS | `uabdec <in> <out>` |
 
-两者都是 **32 位 x86 ELF**（`ELF 32-bit LSB, machine=3`）。在 x86_64 的 Linux 上跑，
-需要装 i386 运行库，否则会报一个很有迷惑性的错误：
+两者都是 **32 位 x86 ELF**（`ELF 32-bit LSB, machine=3`），而且是**静态链接**
+（`file` 输出里带 `statically linked`，程序头里没有 `PT_INTERP`）。
+
+**实测（2026-10-21，ubuntu-24.04 runner）**：不需要装任何 i386 运行库，
+`chmod +x` 之后直接就能跑，`bcdec` 对空输入返回 0、对 `sharecfgdata` 分段
+2422/2422 成功。所以下面这套 `libc6:i386` 的说明是旧版本的遗留，留作参考：
 
 ```
 bash: ./tools/bcdec: No such file or directory     # 文件明明存在
 ```
 
-真正的原因是 32 位 ELF 解释器 `/lib/ld-linux.so.2` 不存在。修法：
+只有**动态链接**的 32 位 ELF 才会因为缺 `/lib/ld-linux.so.2` 报这个迷惑性错误。
+真遇到了再装：
 
 ```bash
 sudo dpkg --add-architecture i386
