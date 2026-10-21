@@ -51,6 +51,10 @@ on:
         default: used
         type: choice
         options: [used, all]
+      limit:
+        description: "每类每片最多处理几个（0 = 不限。调管路时用它把成本压到最小）"
+        default: "0"
+        type: string
       force:
         description: "忽略 state 里已存在的 md5，连未变化的也重做"
         default: false
@@ -202,6 +206,7 @@ jobs:
                 --state .azl/state-$SHARD.json --scope ${{ inputs.scope }} \
                 --items ${{ inputs.items }} --shard $SHARD/$N \
                 --report-files .azl/written-$SHARD.list"
+          if [ "${{ inputs.limit }}" != "0" ]; then ARGS="$ARGS --limit ${{ inputs.limit }}"; fi
           if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           echo "python scripts/azl_assets.py $ARGS"
