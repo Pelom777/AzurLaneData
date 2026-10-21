@@ -201,7 +201,11 @@ def unpack_scripts32(bundle: Path, work: Path, cache: Path) -> dict[str, str]:
         name = rel[len("sharecfg/"):-len(".lua.bytes")]
         if name not in SHARECFG_WANTED:
             continue
-        raw = bytes(reader.read().script)
+        # UnityPy 1.10+ 把 TextAsset 的脚本体改叫 m_Script，老的 .script 已移除；
+        # 而且 m_Script 是**解成 str** 的（utf-8 + surrogateescape），
+        # 直接 encode 回去才是原始字节 —— 这也是 UnityPy 自己 exportTextAsset 的做法。
+        # 不用这个逆变换的话，二进制字节码会被 str 化搞坏。
+        raw = reader.read().m_Script.encode("utf-8", "surrogateescape")
         key = hashlib.md5(raw).hexdigest()
         hit = cache / f"sc-{name}-{key}.lua"
         if hit.exists():
