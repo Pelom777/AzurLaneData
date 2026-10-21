@@ -30,6 +30,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import zlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -633,7 +634,21 @@ def main() -> int:
     ap.add_argument('--scope', choices=('used', 'all'), default='used',
                     help='used=只导 public/data 引用到的资源（与仓库收录规则一致）；'
                          'all=清单里的全导')
+    ap.add_argument('--shard', default='', metavar='I/N',
+                    help='分片：只处理 crc32(名字) %% N == I 的那一份（I 从 0 起）。'
+                         '给磁盘紧张的环境分批全量重建用；按名字取模而不是按顺序切，'
+                         '所以分片结果与清单顺序无关，重跑时同一批还是同一批')
     args = ap.parse_args()
+
+    shard_i, shard_n = 0, 1
+    if args.shard:
+        try:
+            _i, _n = args.shard.split('/')
+            shard_i, shard_n = int(_i), int(_n)
+        except ValueError:
+            die(f'--shard 需要 I/N 形式，收到 {args.shard!r}')
+        if not 0 <= shard_i < shard_n:
+            die(f'--shard 越界: {args.shard}（要求 0 <= I < N）')
 
     import UnityPy
     import cv2  # noqa: F401  提前失败，避免下完几十 GB 才发现缺依赖
@@ -676,9 +691,11 @@ def main() -> int:
     prev = state.setdefault('items', {}).setdefault(server, {})
 
     report = {'new': 0, 'changed': 0, 'skipped': 0, 'seeded': 0, 'failed': 0,
-              'files': 0, 'unused': 0}
+              'files': 0, 'unused': 0, 'other_shard': 0}
     written: list[Path] = []
     items = args.items or ['painting', 'squareicon', 'shipicon']
+    if shard_n > 1:
+        log(f'分片 {shard_i}/{shard_n}：只处理 crc32(名字) % {shard_n} == {shard_i} 的部分')
 
     used = set()
     if args.scope == 'used':
@@ -713,6 +730,10 @@ def main() -> int:
             if item == 'painting' and path.endswith(('_tex', '-mesh')):
                 continue
             name = path.split('/', 1)[1].lower()
+            # 分片：crc32 而不是 hash()，后者按进程随机化，换一次进程分片就变了
+            if shard_n > 1 and zlib.crc32(name.encode()) % shard_n != shard_i:
+                report['other_shard'] += 1
+                continue
             if scoped and name not in used:
                 report['unused'] += 1
                 continue
@@ -811,12 +832,15 @@ def main() -> int:
 
     log(f'完成: 新增 {report["new"]}, 变更 {report["changed"]}, '
         f'跳过 {report["skipped"]}, 失败 {report["failed"]}, '
-        f'未被引用 {report["unused"]}')
+        f'未被引用 {report["unused"]}'
+        + (f', 他片 {report["other_shard"]}' if shard_n > 1 else ''))
     if report['seeded']:
         log(f'  其中 {report["seeded"]} 个是状态播种（产物已在磁盘，只补 state 记录）')
     append_summary(
         '### 资源提取\n'
-        f'- 版本：`{server}` `{version["versions"].get("az", {}).get("version")}`\n'
+        f'- 版本：`{server}` `{version["versions"].get("az", {}).get("version")}`'
+        f'（painting `{version["versions"].get("painting", {}).get("version")}`）\n'
+        f'- 分片：`{args.shard or "1/1"}`\n'
         f'- 新增 `{report["new"]}` / 变更 `{report["changed"]}` / '
         f'跳过 `{report["skipped"]}` / 失败 `{report["failed"]}`\n'
         f'- 未被 data 引用而跳过 `{report["unused"]}`\n'
@@ -826,6 +850,7 @@ def main() -> int:
     set_output(
         changed='true' if (report['new'] or report['changed']) else 'false',
         new=report['new'], changed_count=report['changed'], failed=report['failed'],
+        files=report['files'], written=len(written),
     )
     return 0
 
