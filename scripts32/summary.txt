@@ -1,0 +1,6 @@
+产出 4 张表
+  attribute_info_by_type.json: 13 条 / 623 字节 / 样例键 ['1', '10', '11']
+  ship_data_strengthen.json: 863 条 / 87120 字节 / 样例键 ['10000', '10001', '10002']
+  ship_data_trans.json: 110 条 / 22116 字节 / 样例键 ['10103', '10104', '10108']
+  transform_data_template.json: 1254 条 / 426727 字节 / 样例键 ['1001', '1002', '1003']
+缺失：无
