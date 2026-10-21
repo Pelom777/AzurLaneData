@@ -1,0 +1,39 @@
+# 运行产物
+raw/
+.cache/
+work/
+tmp/
+.tmp/
+
+# 探针证据（只在 p0-artifacts 分支上用 -f 提交）
+/p0/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 本地调试用的资源（资产不进 git，见 docs/HANDOFF.md）
+public/painting/
+public/spine/
+public/squareicon/
+public/shipicon/
+public/equipicon/
+public/paintingface/
+public/qicon/
+public/item/
+public/bg/
+public/skillicon/
+public/herohrzicon/
+public/equips/
+public/iconframe/
+public/shipyardicon/
+public/memoryicon/
+public/neweducateicon/

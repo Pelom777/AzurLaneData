@@ -1,0 +1,6 @@
+# 统一用 LF：脚本在 Linux runner 上跑，CRLF 只会带来噪音
+* text=auto eol=lf
+
+# 32 位 ELF 必须原样传输（autocrlf 一旦改动一个字节就废了）
+tools/bcdec binary
+tools/uabdec binary

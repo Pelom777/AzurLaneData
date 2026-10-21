@@ -1,0 +1,122 @@
+name: update-data
+
+# 每小时检查一次版本；只有 azhash 变了才真正解包和构建。
+# 只 commit 数据 json（十几 MB），资产不进 git —— 原因见 docs/HANDOFF.md「容量」。
+
+on:
+  schedule:
+    - cron: "20 * * * *"
+  workflow_dispatch:
+    inputs:
+      server:
+        description: "目标服务器"
+        default: CN
+        type: choice
+        options: [CN, EN, JP, KR, TW]
+      force:
+        description: "忽略版本比对，强制全量重解"
+        default: false
+        type: boolean
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  SERVER: ${{ inputs.server || 'CN' }}
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # bcdec / uabdec 是 32 位 x86 ELF，x86_64 runner 需要 i386 运行库。
+      # 没有这一步会报 "No such file or directory"（其实是 ELF 解释器缺失）。
+      - name: 安装 32 位运行库
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libc6:i386
+          chmod +x tools/bcdec tools/uabdec
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install -q --upgrade pip
+          # ljd 是纯 Python 反编译器，官方以 wheel 形式放在 release 上
+          python -m pip install -q \
+            https://github.com/AzurLaneTools/ljd/releases/download/wheel/ljd-0.1.7-py3-none-any.whl
+          python -m pip install -q UnityPy
+
+      # 反编译是整个链路里最贵的一步（几十张表、上百 MB 字节码）。
+      # 缓存按内容 md5 命中，所以稳定期每小时实际上只重解 0~2 张表。
+      - name: 恢复反编译缓存
+        uses: actions/cache@v4
+        with:
+          path: .cache/lua
+          key: lua-${{ env.SERVER }}-${{ github.run_id }}
+          restore-keys: |
+            lua-${{ env.SERVER }}-
+
+      - name: 版本比对
+        id: ver
+        run: python scripts/check_version.py --server "$SERVER" --state data/version.json
+
+      - name: 解包 Lua 配置表
+        if: steps.ver.outputs.changed == 'true' || inputs.force
+        run: |
+          python scripts/unpack_lua.py \
+            --server "$SERVER" \
+            --out raw \
+            --work .cache/work \
+            --cache .cache/lua
+
+      - name: 构建 public/data
+        if: steps.ver.outputs.changed == 'true' || inputs.force
+        run: |
+          python scripts/build_data.py --raw raw --out public/data
+
+      - name: 契约校验
+        id: contract
+        if: steps.ver.outputs.changed == 'true' || inputs.force
+        run: python scripts/check_data_contract.py --data public/data
+
+      - name: 维护新增台账
+        if: steps.ver.outputs.changed == 'true' || inputs.force
+        run: |
+          python scripts/track_new.py \
+            --data public/data \
+            --version "${{ steps.ver.outputs.version }}"
+
+      - name: 记录版本
+        if: steps.ver.outputs.changed == 'true' || inputs.force
+        run: python scripts/check_version.py --server "$SERVER" --state data/version.json --write
+
+      - name: 提交
+        if: steps.contract.outcome == 'success'
+        run: |
+          python scripts/commit.py \
+            --paths public/data data/version.json \
+            --message "data: ${{ env.SERVER }} ${{ steps.ver.outputs.version }}"
+
+      - name: 摘要
+        if: always()
+        run: |
+          {
+            echo "## 数据更新 · $SERVER"
+            echo ""
+            echo "- 版本：\`${{ steps.ver.outputs.version }}\`（变化：\`${{ steps.ver.outputs.changed }}\`）"
+            echo "- 表数：\`${{ steps.ver.outputs.tables || '-' }}\` 条数：\`${{ steps.ver.outputs.entries || '-' }}\`"
+            echo "- 新增：船 \`${{ steps.ver.outputs.new_ships || 0 }}\` 皮肤 \`${{ steps.ver.outputs.new_skins || 0 }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
