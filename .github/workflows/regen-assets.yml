@@ -78,15 +78,12 @@ env:
   RCLONE_CONFIG_R2_REGION: auto
 
 jobs:
-  # 1) 把"分片数"变成真正的矩阵数组。写死 [0,1,2,3,4,5] 的话改 shards 输入不会
-  #    生效，那个输入就是假的。
-  # 2) 远端清单只拉一次做成 artifact，六个分片共用同一份快照。各片自己拉也没错，
-  #    但会让"同一轮里不同片看到的远端不一样"成为可能，排查时会很难解释。
+  # 把"分片数"变成真正的矩阵数组。写死 [0,1,2,3,4,5] 的话改 shards 输入不会
+  # 生效，那个输入就是假的。
   prep:
     runs-on: ubuntu-latest
     outputs:
       shards: ${{ steps.gen.outputs.shards }}
-      remote: ${{ steps.lsf.outputs.remote }}
     steps:
       - name: 生成分片矩阵
         id: gen
@@ -99,53 +96,6 @@ jobs:
             echo "::error::shards 取 1..16，收到 $N"; exit 1
           fi
           echo "shards=$(python3 -c 'import json,sys;print(json.dumps(list(range(int(sys.argv[1])))))' "$N")" >> "$GITHUB_OUTPUT"
-
-      - name: 安装 rclone
-        if: ${{ !inputs.dry_run }}
-        run: |
-          curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone.zip
-          unzip -oq /tmp/rclone.zip -d /tmp/rclone
-          cp /tmp/rclone/rclone-*/rclone /usr/local/bin/rclone
-          chmod +x /usr/local/bin/rclone
-          rclone version | head -1
-
-      - name: 检查 R2 凭据
-        if: ${{ !inputs.dry_run }}
-        run: |
-          missing=""
-          [ -z "$RCLONE_CONFIG_R2_ACCESS_KEY_ID" ] && missing="$missing R2_ACCESS_KEY_ID"
-          [ -z "$RCLONE_CONFIG_R2_SECRET_ACCESS_KEY" ] && missing="$missing R2_SECRET_ACCESS_KEY"
-          [ -z "${{ secrets.R2_ACCOUNT_ID }}" ] && missing="$missing R2_ACCOUNT_ID"
-          [ -z "${{ secrets.R2_BUCKET }}" ] && missing="$missing R2_BUCKET"
-          if [ -n "$missing" ]; then
-            echo "::error::缺少 secrets:$missing（配置方法见 docs/CDN.md §5.1）"
-            exit 1
-          fi
-          echo "凭据齐全，桶 = ${{ secrets.R2_BUCKET }}"
-
-      - name: 拉取远端对象清单
-        id: lsf
-        if: ${{ !inputs.dry_run }}
-        run: |
-          mkdir -p .azl
-          # --recursive 不能省：rclone lsf 默认只列一层，而产物全在 <item>/ 子目录下。
-          # 不加这句列出来永远是空的，mark_remote 会静默失效（已经踩过一次）。
-          if ! rclone lsf "r2:${{ secrets.R2_BUCKET }}" --files-only --recursive > .azl/remote.lst; then
-            echo "::error::读不到桶 ${{ secrets.R2_BUCKET }}（先按 docs/CDN.md §4.0 建桶，"
-            echo "::error::并确认 token 有 Object Read & Write 权限）"
-            exit 1
-          fi
-          n=$(wc -l < .azl/remote.lst)
-          echo "远端已有 $n 个对象"
-          echo "remote=$n" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/upload-artifact@v4
-        if: ${{ !inputs.dry_run }}
-        with:
-          name: remote-listing
-          path: .azl/remote.lst
-          retention-days: 1
-          if-no-files-found: error
 
   regen:
     needs: prep
@@ -179,12 +129,35 @@ jobs:
           cp /tmp/rclone/rclone-*/rclone /usr/local/bin/rclone
           chmod +x /usr/local/bin/rclone
 
-      - name: 取远端清单
+      - name: 检查 R2 凭据
         if: ${{ !inputs.dry_run }}
-        uses: actions/download-artifact@v4
-        with:
-          name: remote-listing
-          path: .azl
+        run: |
+          missing=""
+          [ -z "$RCLONE_CONFIG_R2_ACCESS_KEY_ID" ] && missing="$missing R2_ACCESS_KEY_ID"
+          [ -z "$RCLONE_CONFIG_R2_SECRET_ACCESS_KEY" ] && missing="$missing R2_SECRET_ACCESS_KEY"
+          [ -z "${{ secrets.R2_ACCOUNT_ID }}" ] && missing="$missing R2_ACCOUNT_ID"
+          [ -z "${{ secrets.R2_BUCKET }}" ] && missing="$missing R2_BUCKET"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少 secrets:$missing（配置方法见 docs/CDN.md §5.1）"
+            exit 1
+          fi
+          echo "凭据齐全，桶 = ${{ secrets.R2_BUCKET }}"
+
+      # 各片自行拉清单。桶 listing 一次约几秒，比起把它做成 artifact 在六个 job
+      # 之间搬来搬去更简单，也避免了 download-artifact 对单文件路径的处理差异。
+      # 并行片之间不会互相干扰：crc32 分片保证每片只碰自己那批名字。
+      - name: 拉取远端对象清单
+        if: ${{ !inputs.dry_run }}
+        run: |
+          mkdir -p .azl
+          # --recursive 不能省：rclone lsf 默认只列一层，而产物全在 <item>/ 子目录下。
+          # 不加这句列出来永远是空的，mark_remote 会静默失效（已经踩过一次）。
+          if ! rclone lsf "r2:${{ secrets.R2_BUCKET }}" --files-only --recursive > .azl/remote.lst; then
+            echo "::error::读不到桶 ${{ secrets.R2_BUCKET }}（先按 docs/CDN.md §4.0 建桶，"
+            echo "::error::并确认 token 有 Object Read & Write 权限）"
+            exit 1
+          fi
+          echo "远端已有 $(wc -l < .azl/remote.lst) 个对象"
 
       # 干净 checkout 里 public/<item>/ 被 .gitignore 挡在外面，判据的第二个条件
       # （产物文件存在）恒为假。远端存在同名对象就是它的等价证据。
@@ -196,19 +169,17 @@ jobs:
       # 若各片从空 state 起手，每次 dispatch 都会全量重解一遍。
       - name: 准备分片 state
         run: |
-          SHARD="${{ matrix.shard }}"
           [ -f .azl/assets-state.json ] || echo '{}' > .azl/assets-state.json
-          cp .azl/assets-state.json ".azl/state-$SHARD.json"
           python - <<'PY'
           import json, shutil
-          d = json.load(open('.azl/assets-state.json', encoding='utf-8'))
+          src = '.azl/assets-state.json'
+          dst = '.azl/state-${{ matrix.shard }}.json'
+          d = json.load(open(src, encoding='utf-8'))
           items = d.get('items') or {}
           desc = ', '.join('%s=%d' % (k, len(v)) for k, v in items.items()) or '空'
-          total = sum(len(v) for v in items.values())
-          print(f'基线 state：{desc}（共 {total} 条）')
-          shutil.copyfile('.azl/assets-state.json',
-                          '.azl/state-${{ matrix.shard }}.json')
-          print('已复制为分片 state：.azl/state-${{ matrix.shard }}.json')
+          print(f'基线 state：{desc}（共 {sum(len(v) for v in items.values())} 条）')
+          shutil.copyfile(src, dst)
+          print(f'已复制为分片 state：{dst}')
           PY
 
       # 磁盘先体检再开跑。跑到一半写满是最难查的失败：表现是 cv2 报 IO 错、
@@ -281,14 +252,24 @@ jobs:
 
       # 每片单独落一个 state 文件 —— 六个 job 各写各的，最后在 merge 里合成。
       # 不能共用同一个文件：并行 job 无法互相看见改动，后写完的会盖掉先写完的。
+      #
+      # 传目录而不是单文件：upload-artifact 对单文件路径的处理会保留目录前缀，
+      # 取回来就变成 .azl/states/.azl/state-N.json，合并时 glob 找不到会直接失败。
+      # 目录作为根时内容会被摊平，落点才是确定的。
       - name: 上传 state 片段
         if: ${{ !inputs.dry_run }}
-        uses: actions/upload-artifact@v4
+        run: |
+          mkdir -p ".azl/frag"
+          cp ".azl/state-${{ matrix.shard }}.json" ".azl/frag/state-${{ matrix.shard }}.json"
+          ls -l ".azl/frag"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.dry_run }}
         with:
           name: state-${{ matrix.shard }}
-          path: .azl/state-${{ matrix.shard }}.json
+          path: .azl/frag
           retention-days: 3
-          if-no-files-found: warn
+          if-no-files-found: error
 
   # 把各片 state 合成一份并提交。state 进 git 是增量链路的前提：下一轮
   # regen / sync 都靠它判断"这个资源我已经按哪个 md5 生成过了"。
