@@ -1,4 +1,4 @@
-# 阶段 0–2 验收记录
+# 阶段 0–3 验收记录
 
 > 2026-10-21，CN 服 `$azhash$9$7$398$def4c26318af25f3`。
 > CI 日志只保留 90 天，这里固化数字。原始证据在 `p0-artifacts` / `stage1-artifacts` /
@@ -58,11 +58,61 @@ md5 全对**。
 
 缓存只有 7.9 MB（zstd 后），因为缓存的只是反编译出来的 lua 文本，按内容 md5 分文件。
 
+## 阶段 3：资产链路（R2）
+
+**代码就绪，未跑过真实桶**（缺 4 个 secrets）。方案与操作步骤见 `docs/CDN.md`。
+
+### 链路本地实测
+
+| 项 | 结果 |
+|---|---|
+| `--items squareicon --limit 2` | 12 s，产出 2 个 png（27,131 / 26,221 字节） |
+| `--items painting --limit 1 --scope used` | 3.9 s，产出 png 813,051 + json 173 + obj 10,249 字节 |
+| 引用集 | `public/data` 里认出 **2,581** 个 painting 名 |
+| numpy 版本敏感性 | 2.5.4 与 2.4.6 产出**同一 md5**（`f42081cd…`），降版本不改输出 |
+
+### 依赖版本坑（已修）
+
+第一次 CI run `39606425719` 在「安装依赖」失败：
+
+```
+Could not find a version that satisfies the requirement numpy==2.5.4
+```
+
+按 PyPI metadata：`numpy 2.5.4` 是 `requires_python >=3.12`，而 workflow 统一用 3.11。
+改成 `2.4.6`（最后一个支持 3.11 的）。`opencv-python-headless` 的 wheel 是
+`cp37-abi3`，不受影响。
+
+### CI run `39606838559`
+
+| 步骤 | 结果 |
+|---|---|
+| 安装依赖 | ✅ `cv2 5.0.0 \| numpy 2.4.6` |
+| 安装 rclone | ✅ `rclone v1.75.2` |
+| 检查 R2 凭据 | ❌ 按设计报缺：`R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_ACCOUNT_ID R2_BUCKET` |
+| 后续步骤 | skipped（符合预期，没有凭据不该往下走） |
+
+### 空工作区陷阱（这轮最关键的发现）
+
+`azl_assets.py` 的跳过判据要求 state 有 md5 **且** 产物文件在磁盘。CI 是干净
+checkout、图被 gitignore，第二个条件永远为假 → **每轮都会全量重跑 5.9 GB**。
+
+解法是 `scripts/mark_remote.py`：`rclone lsf` 拿远端 key，本地 `touch` 出同名空
+marker。用 9 行假清单单测过：
+
+| 输入 | 结果 |
+|---|---|
+| `painting/22/22.json`、`squareicon/2b.png`、`shipicon/abc.png` | ✅ 补齐 3 个 |
+| `painting/22/22.png`、`*.obj`、`spine/*.skel`、`data/ship.json` | 忽略 4 个 |
+| `../evil.png`、`/abs/x.png` | 拒绝 2 个 |
+| 第二次运行 | 补齐 0 / 已存在 3（幂等） |
+
 ## 已知遗留
 
 - 每小时 cron 只握手比版本，没变就退；真正提交频率 = 游戏更新频率。
 - `get_version()` 没有重试：登录服偶发抖动会让那一次 run 变红（不影响数据）。
-- 阶段 3/4（资产搬迁、前端切换）未开始。
+- 阶段 3 的**首次 6.8 GB 播种**要本地做（R2 凭据就位后）；阶段 4（前端切 CDN）未开始。
+- `spine` 1.10 GB 无法自动更新，只能从旧仓库搬一次。
 - `p0-probe.yml` / `stage1-verify.yml` / `scripts32-probe.yml` 与
   `scripts/p0_probe.py` / `scripts/stage1_report.py` 是**验收用临时件**，
   阶段 4 切换完成后可删。

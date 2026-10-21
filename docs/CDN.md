@@ -83,6 +83,22 @@ https://pub-<32位桶ID>.r2.dev
 
 ## 4. 首次播种（本地，只做一次）
 
+### 前置：本地依赖
+
+```bash
+python -m venv .venv
+.venv/Scripts/activate                 # Windows；Linux/macOS 是 source .venv/bin/activate
+pip install -r requirements.txt        # UnityPy / ljd / numpy / opencv-headless
+
+# rclone 是 Go 写的单文件二进制，不是 pip 包
+winget install Rclone.Rclone           # Windows
+# brew install rclone                  # macOS
+# curl -fsSL https://rclone.org/install.sh | sudo bash   # Linux
+```
+
+`pip install -r requirements.txt` 在 py3.11 和 3.13 上都实测通过；
+`numpy` 锁 2.4.6 是因为 2.5.x 要求 Python >=3.12（见文件内注释）。
+
 ### 4.0 先建桶（Dashboard，一次性）
 
 1. R2 → **Create bucket**，名字 `azl-assets`，location 选 Automatic
