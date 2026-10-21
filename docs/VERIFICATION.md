@@ -161,6 +161,45 @@ marker。用 9 行假清单单测过：
   `scripts/p0_probe.py` / `scripts/stage1_report.py` 是**验收用临时件**，
   阶段 4 切换完成后可删。
 
+## 阶段 3：资源上 CDN
+
+### rclone 两个 bug（都是静默的）
+
+| 现象 | 根因 | 证据 |
+|---|---|---|
+| 「上传 2 个对象」成功，下一轮却报「远端已有 0 个」 | `rclone lsf` 默认只列一层，产物全在 `<item>/` 子目录下 | 加 `--recursive` 后同一对象可见 |
+| `S3: CreateBucket ... 403 AccessDenied` | R2 对限定单桶的 token，`HeadBucket` 返回 403，rclone 误判桶不存在 | 加 `--s3-no-check-bucket` 后写入成功 |
+
+修好后重跑（run `39612271958`）：远端 2 个对象 → marker 补齐 2 →
+**新增 0 / 跳过 2**。这是「空工作区陷阱真的被堵住」的第一个可信证据。
+
+### 公共读（r2.dev）
+
+`GET /squareicon/22.png` → `200` `image/png` 27,131 字节，md5 `68c03aeb…`
+与桶内对象逐字节一致；不存在 key → `404`。
+CORS 默认关闭，`OPTIONS` 预检 `403`，且 S3 API 的 `Get/PutBucketCors` 也是
+`AccessDenied`（只能在控制台配）——见 `docs/CDN.md` §3.1。
+
+### regen-assets 管路连通性（run `39640672963`）
+
+用 `items=squareicon shards=2 limit=3` 把成本压到最小，验证整条链路：
+
+```
+远端已有 5233 个对象 → marker 补齐 4826 / 非 marker 407
+基线 state：CN=2
+分片 0：新增 3, 跳过 1, 他片 6      ← "他片 6" 证明 crc32 分片互斥且完整
+merge：片段 2 个 → 应用 6 条，冲突 0 条；state 现有 8 条
+提交 32fe98a3 assets: 重建 squareicon（2 片）
+```
+
+四个 job 全部 success，state 真的落库。
+
+### painting 全量重建
+
+run `39641164165`，6 片并行。截至记录时六片均已通过
+marker / state 继承 / 磁盘预检，进入生成阶段。
+期望：`新增` 合计 ≈ 2,491，`失败` = 0，每片产物约 0.9 GB。
+
 ## 复现
 
 ```bash

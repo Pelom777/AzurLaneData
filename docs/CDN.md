@@ -130,6 +130,20 @@ Dashboard → 桶 → Settings → **CORS Policy** → Add，粘贴：
 
 ## 4. 首次播种（本地，只做一次）
 
+> **2026-10-22 起，可生成的类别不要再走本节 —— 改走 §4.5 的 CI 全量重生。**
+>
+> 原因是 `--seed`（§4.2）把「磁盘上这份 = 官方最新版」这个**不可验证的假设**
+> 写进 state：state 里记的是当前 CDN 的 md5（`azl_assets.py`
+> `prev[key] = info['md5']`），但磁盘上的字节来自 2025-06-06 的旧快照。
+> 若这 16 个月里官方替换过某张老立绘，seed 之后它会**永久停在旧版本且不报错**。
+>
+> 实测反驳了「必须依赖旧快照」的前提：CDN 清单是**全量文件表**而非补丁列表
+> （旧仓库 2025-06 的 2,159 个立绘在当前清单里 100% 还在；当前 painting 清单
+> 有 6,700 个基础名，是旧仓库的 3.1 倍），且当前数据引用的 2,491 张立绘
+> **一张都不缺**。所以从 CDN 现取的原料是齐的，没必要吃这个假设。
+>
+> 本节只在一种情况下还有用：** `spine` 等脚本没有生成器的类别**（§2 的 B 类）。
+
 ### 前置：本地依赖
 
 ```bash
@@ -223,6 +237,77 @@ rclone copy public r2:azurlane-assets \
 | 20 Mbps | 约 47 分钟 |
 | 50 Mbps | 约 19 分钟 |
 | 100 Mbps | 约 9 分钟 |
+
+## 4.5 可生成类别：走 CI 全量重生（`.github/workflows/regen-assets.yml`）
+
+这是现在的**主路径**。和上面几节的区别：**一切从当前 CDN 现取**，
+不依赖任何历史快照，产出的每张图都是官方当前版本。
+
+### 为什么必须有这个 workflow，而不能直接扩 sync-assets
+
+painting 全量约 **2,491 张 / 下载 3.7 GB / 产物 5.6 GB**。托管 runner 的 `/`
+只有约 14 GB，单 job 峰值约 9.3 GB 且中途无法回收。所以按
+`crc32(名字) % N` 切成 N 片并行，每片跑完立刻上传、立刻丢弃，
+磁盘占用与 N 成反比（N=6 时每片约 1.6 GB）。
+
+### 用法
+
+```bash
+# GitHub → Actions → regen-assets → Run workflow
+items  = painting          # 空格分隔；painting 会顺带产出 paintingface
+shards = 6                 # 1..16，越大越省磁盘
+scope  = used              # 按 public/data 的引用集过滤
+limit  = 0                 # 调试时给个小值（如 3）把成本压到最小
+force  = false             # true = 忽略已存在的 md5，连未变的也重做
+dry_run= false             # true = 只生成，不拉远端、不上传、不提交
+```
+
+或用命令行触发：
+
+```bash
+gh workflow run regen-assets.yml \
+  -f items=painting -f shards=6 -f scope=used -f limit=0
+```
+
+### 前置条件
+
+`public/data` 必须是**当前版本**的数据 —— 它是 `--scope used` 的引用集来源。
+数据旧了会漏掉新船（实测旧 16 个月的数据漏 333 张立绘）。
+不放心就先 dispatch 一次 `update-data`（`force=true`）把它刷新。
+
+### 为什么它「以后更新时也能用」
+
+关键在 state 的处理，三个细节缺一不可：
+
+1. **每个分片继承基线 state**（`cp .azl/assets-state.json .azl/state-N.json`）。
+   一旦各片从空 state 起手，每次 dispatch 都会全量重解一遍 —— 那就退化成
+   一次性脚本了。继承之后：首次没记录 → 全量重生；之后只有官方改过的
+   （md5 变了）才重做。
+2. **配合 `mark_remote`** 把「远端已有对象」翻译成本地 marker，使判据的第二个
+   条件（产物在磁盘）在干净 checkout 里也成立。
+3. **刻意不加 `--seed`**。seed 会在「远端有、state 没记」时跳过，正好把上面
+   那个不可验证的假设写进来。宁可多花几分钟重解，也不要静默停在旧版。
+
+### 合并 state 的规则（容易写错的一处）
+
+每个片段都是从**同一份基线**复制出来的，所以它里面既有本片真正处理过的 key，
+也有照抄来的基线值。直接按文件名顺序 union，排在后面的片段会用**旧的基线值**
+覆盖前面片段刚算出的新值 —— 表现是「这一轮跑了，下一轮还在跑同一批」。
+
+正确做法是按 key 做差分：只有「与基线不同的那个值」才是本片的新成果。
+若同一个 key 冒出两个不同的新值，说明分片键漂了，保守保留基线并告警。
+
+### 成本
+
+| 项 | 数值 |
+|---|---|
+| 下载 bundle | 3.7 GB（6 片分摊，每片约 0.6 GB） |
+| 产物 | 5.6 GB（每片约 0.9 GB） |
+| 渲染 | 实测单张约 2.2 s → 6 片并行约 20 分钟（含装依赖） |
+| Actions 分钟 | 6 × 约 22 ≈ 130 分钟 / 次全量（free 额度 2000 分钟/月） |
+
+> 全量重生的代价是一次约 130 分钟的 Actions 配额，别频繁跑；
+> 日常增量走 `sync-assets.yml`。
 
 ## 5. 增量同步（CI）
 
@@ -392,8 +477,10 @@ r2.dev 因为没有 Cache 规则，实际上只看对象上的 `Cache-Control` �
 | CI 空工作区导致全量重跑 | ✅ 用 `scripts/mark_remote.py` 补 marker 解决，见 §5.2 |
 | `rclone lsf` 缺 `--recursive` 使上面那条失效 | ✅ 已修（2026-10-21 实测发现），见 §5.2 |
 | R2 受限 token 触发 `CreateBucket` 403 | ✅ 已加 `--s3-no-check-bucket` |
-| `spine` 无法自动 | ⚠️ 已决定：旧仓库搬一次，前端加 fallback |
+| `spine` 无法自动 | ⚠️ 无生成器，只能从旧仓库搬一次；前端需 fallback |
 | `HANDOFF.md` 写着"已支持 spine" | ⚠️ 表述有误，实际不支持 |
+| 单 job 跑不下 painting 全量 | ✅ 新增 `regen-assets.yml`，crc32 分片并行，见 §4.5 |
+| 每个分片从空 state 起手 ⇒ 每轮全量 | ✅ 改为继承基线 state + 差分合并，见 §4.5 |
 
 ## 8. 验收标准
 
