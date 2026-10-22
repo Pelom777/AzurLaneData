@@ -532,6 +532,29 @@ banjiu  feiniao  gaoxiong_6  xishao  xuebugui  xuequan  yan  zi_shanluan
 每个 `_ex` 只多产 3 个文件（`<name>_ex.json` + `<name>_rw_ex.png` + mesh），
 基底与正面贴图复用本体的，不重复占空间。
 
+## 4.11 比对旧仓库时，以 json 的引用为准，不要数文件
+
+旧仓库的管线会把所有 `painting/<x>*` 的包都倒进 `<base>/` 目录，于是留下
+一堆**谁都不引用**的 png。按文件数比对，会把这些当成「我们缺东西」。
+
+2026-10-22 那轮就误判了 6 张：
+
+| 立绘 | 旧仓库多出的文件 | json 引用情况 |
+|---|---|---|
+| `kelong` | `kelong-ui.png` / `-mesh.obj` | 旧 json 只有 `kelong` 一个键，没引用 |
+| `kenisibao` | `kenisibao-ui.png` / `-mesh.obj` | 同上 |
+| `wuzang` | `wuzang_building.png` / `-mesh.obj` | 旧 json 3 个键，没引用 |
+| `siwangzhuzai` | `siwangzhuzai_bj1.png` / `-mesh.obj` | 旧 json 3 个键，没引用 |
+| `nengdai_idol` | `nengdai_idol_rw.png` / `-mesh.obj` | 旧 json 2 个键，没引用 |
+| `tiancheng_cv` | — | **真差异**：旧版 `_rw1`+`_rw2`，当前包只有一个 `_rw` |
+
+前 5 张我们的键集合与旧 json **完全一致**，不需要动。只有 `tiancheng_cv`
+是游戏侧改结构（画布 5550×4290 → 3656×2976，两个 rig 图层合成一个）。
+
+正确做法：取旧 json，把 `key` 展开成需要的文件名
+（`<key>.png` + 非 `raw` 的 `<key>-mesh.obj`），再看差集。
+未被引用的文件一律不算缺口。
+
 ## 5. 增量同步（CI）
 
 ### 5.1 凭据：4 个 secrets
@@ -754,6 +777,10 @@ r2.dev 因为没有 Cache 规则，实际上只看对象上的 `Cache-Control` �
 | 每个分片从空 state 起手 ⇒ 每轮全量 | ✅ 改为继承基线 state + 差分合并，见 §4.5 |
 | 两个入口对 `--seed` 语义相反 | ✅ 合并为 `update-assets.yml`，seed 默认关，见 §4.5 |
 | `commit.py` 的「推送成功」不可信 | ⚠️ 已加推后回读校验，见 §5.6 |
+| 改造版 `_ex` 完全没导出 | ✅ 已导（8 张），内联进本体目录，前端零改动，见 §4.10 |
+| 旧仓库里一堆没有 json 引用的孤儿 png | ✅ 不是缺口 —— 它的 json 本来就不引用，按文件数比对会误判，见 §4.11 |
+| `tiancheng_cv` 图层与旧仓库不同 | ✅ 游戏侧改动（两个 `_rw` 合成一个，画布 5550×4290 → 3656×2976），非缺陷 |
+| 普通 `Transform` 截断图层遍历 | ✅ 已修，见 §4.9 |
 
 ## 8. 验收标准
 
