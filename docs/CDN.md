@@ -245,13 +245,18 @@ rclone copy public r2:azurlane-assets \
 
 ## 4.5 资源同步：唯一入口 `.github/workflows/update-assets.yml`
 
-这是现在的**主路径**。热更新和全量重建走同一份代码 —— **差别只有 `shards`**。
-和 §4 旧做法（本地搬 + `--seed`）的区别：**一切从当前 CDN 现取**，
-不依赖任何历史快照，产出的每张图都是官方当前版本。
+这是现在的**主路径**。热更新和全量重建走同一份代码，而且**不需要人区分** ——
+`prep` job 先盘点「有多少资源已过期或缺失」，再按每片 400 个算出分几片。
 
-### 为什么合并成一个 workflow
+| 场景 | 盘点结果 | 自动分片 |
+|---|---|---|
+| 日常热更（改了几张图） | 几个~几十个 | 1 片 |
+| 攒了一批没同步 | 几百个 | 1~2 片 |
+| 首次 / `force` 全量 | 数千个 | 6~16 片 |
 
-2026-10-22 之前有两个：`sync-assets`（热更新）和 `regen-assets`（全量）。
+### 为什么合并成一个 workflow（2026-10-22）
+
+合并前有两个：`sync-assets`（热更新）和 `regen-assets`（全量）。
 6 个步骤逐字重复，但更要命的是**语义相反**：
 
 | | 是否 `--seed` | 后果 |
@@ -260,12 +265,38 @@ rclone copy public r2:azurlane-assets \
 | regen-assets | 刻意不传 | 同上情况 → 重新生成 |
 
 同一个 state 文件在两个入口得出相反结论，是一颗迟早会踩的雷 ——
-而 `--seed` 那条断言**无法验证**：官方换过图也不会被发现，只会永久停在旧版。
+而 `--seed` 那条断言**无法验证**。这个担心不是理论：2026-10-22 上午游戏热更
+`9.7.398 → 9.7.410`，盘点发现 `bisimai` / `shaenhuosite` / `u556` / `yueke_ger`
+四张**已入库**的立绘 md5 变了 —— 如果当初用的是 seed，这四张会永远停在旧版。
 
 现在统一为：**默认不用 seed**，需要时 `seed=true` 显式打开，
 只该用于「把已由别的途径入库的存量资产接进台账」这一件事。
 
-代价：热更新会多两个 job（prep 约 5 s + merge 约 40 s），单次比原来慢约 45 秒。
+### 盘点是怎么算的（`azl_assets.py --plan`）
+
+不是另写一套统计，而是**主循环里的一个分支** —— 枚举、分片键、引用集过滤、
+`_tex`/`-mesh` 排除，全部与正式运行同一份代码，所以这个数不会和工作量漂移。
+
+判据只有一条：`state 里的 md5 != 当前清单的 md5`。
+
+刻意**不看**「产物是否在磁盘」这一半判据：CI 是干净 checkout，产物本来就不在，
+带上它会把已是最新的资源全部误算成待处理。所以这是**下界** —— 远端对象丢失
+也会产生真实工作量，但那属于自愈范畴，不该影响分片决策。
+
+盘点不导入 UnityPy / cv2（两者都是函数内导入），所以 `prep` 不装任何依赖，约 20 秒。
+
+### 分片数怎么定
+
+```text
+shards = ceil(pending / 400)     上限 16，下限 1
+```
+
+400 这个数按 painting 标定：单张约 1.5 MB 下载 + 3.3 MB 产物 ≈ 4.8 MB，
+400 个 ≈ 1.9 GB 峰值，安全落在 runner 的 14 GB 磁盘内（预检阈值取 6 GB）。
+
+`shards=0` 表示自动（默认）；填 1..16 可强制覆盖。**盘点为 0 时仍会跑 1 片** ——
+那一片会用完整判据（含远端 marker）复核一遍，负责「state 说做过、但远端丢了对象」
+的自愈场景。跳过它就等于放弃自愈。
 
 ### 为什么全量必须分片
 
@@ -277,23 +308,17 @@ painting 全量约 **2,491 张 / 下载 3.7 GB / 产物 5.6 GB**。托管 runner
 ### 用法
 
 ```text
-热更新（默认）：   items=6 类全导   shards=1   limit=0   seed=false  force=false
-全量重建：         items=painting  shards=6   force 视情况
-调管路：           items=<某一类>  shards=1   limit=3
-```
-
-```bash
-# GitHub → Actions → update-assets → Run workflow
-gh workflow run update-assets.yml -f items=painting -f shards=6
-gh workflow run update-assets.yml          # 默认即热更新
+热更新：   gh workflow run update-assets.yml            # 默认参数即可，分片自动
+全量重建： gh workflow run update-assets.yml -f force=true
+调管路：   gh workflow run update-assets.yml -f items=painting -f limit=3
 ```
 
 | 输入 | 默认 | 说明 |
 |---|---|---|
 | `items` | 6 类全导 | 空格分隔；`painting` 会顺带产出 `paintingface` |
-| `shards` | `1` | 热更新 1；全量 6（1..16，越大越省磁盘） |
+| `shards` | `0` | **0 = 按盘点自动定**；1..16 强制指定 |
 | `scope` | `used` | 按 `public/data` 的引用集过滤 |
-| `limit` | `0` | 每类每片最多几个，调试用 |
+| `limit` | `0` | 每类每片最多几个，调试用（不影响盘点口径）|
 | `seed` | `false` | **只在一次性迁移存量时打开** |
 | `force` | `false` | 忽略已存在的 md5，连未变的也重做 |
 | `dry_run` | `false` | 只生成，不拉远端、不上传、不提交 |
