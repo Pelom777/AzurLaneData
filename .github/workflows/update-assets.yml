@@ -629,6 +629,7 @@ jobs:
           python scripts/prune_assets.py \
             --data public/data \
             --state .azl/assets-state.json \
+            --bucket "${{ secrets.R2_BUCKET }}" \
             --names ${{ inputs.prune }}
 
       # 预览里被引用集挡下的话，上一步已经 die 了，走不到这里。

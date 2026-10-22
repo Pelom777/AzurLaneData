@@ -185,8 +185,11 @@ jobs:
       #
       # 只在「版本真的变了 + 契约校验通过 + 不是干跑」时触发，
       # 否则每小时 cron 都会白踢一次图片流水线。
+      # `|| inputs.force`：force 一样是"数据重算过了"，引用集可能跟着变
+      # （这次剔除 `_asmr` 就是靠 force 重解才生效的）。少了这一半，
+      # force 出来的新数据不会通知图片侧，得靠人记得再 dispatch 一次。
       - name: 触发资源同步
-        if: steps.ver.outputs.changed == 'true' && steps.contract.outcome == 'success' && inputs.dry_run != true
+        if: (steps.ver.outputs.changed == 'true' || inputs.force) && steps.contract.outcome == 'success' && inputs.dry_run != true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
