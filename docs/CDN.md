@@ -560,7 +560,7 @@ bisimaiz (RectTransform, 有 m_Sprite)          ← 导出成基底层
 banjiu  feiniao  gaoxiong_6  xishao  xuebugui  xuequan  yan  zi_shanluan
 ```
 
-其余 7 个是 `_n_ex`（`_n` 变体不在引用集里），跳过。
+其余 7 个是 `_n_ex`，被 §4.7 的 `_n` 规则直接挡掉（它们在引用集里也是 0）。
 每个 `_ex` 只多产 3 个文件（`<name>_ex.json` + `<name>_rw_ex.png` + mesh），
 基底与正面贴图复用本体的，不重复占空间。
 
