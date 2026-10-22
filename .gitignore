@@ -8,6 +8,10 @@ tmp/
 # 探针证据（只在 p0-artifacts 分支上用 -f 提交）
 /p0/
 
+# WorkBuddy 的会话记忆（.workbuddy/memory/）：本地工作笔记，不是交付物，
+# 也不该出现在仓库的历史里。撤销跟踪的提交留给历史，之后不再新增。
+.workbuddy/
+
 # Python
 __pycache__/
 *.pyc
