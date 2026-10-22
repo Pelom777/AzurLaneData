@@ -118,10 +118,14 @@ def _natural(value: str):
 class PaintingExporter:
     """把一个立绘包拆成站点要的三件套。merger 只用来加载依赖和解析 PPtr。"""
 
-    def __init__(self, merger, base_name: str):
+    def __init__(self, merger, base_name: str, base_key: str | None = None):
         import azl_assets as A
         self.m = merger
         self.base_name = base_name.lower().lower()
+        # 输出到 json / 文件名里的基底层 key。默认与包内同名；
+        # `_ex`（改造版）是独立资源包、包内基底层叫 <name>_ex，但前端用
+        # json[name]（name 是本体名）取基底尺寸与枢轴，所以 key 必须写回本体名。
+        self.base_key = (base_key or base_name).lower()
         self._to_bgra = A.to_bgra
         self._decode_mesh = A.decode_mesh
         self.layers = []
@@ -224,6 +228,8 @@ class PaintingExporter:
 
         # 仓库里的目录名、文件名、json 键一律小写（游戏内是 2B，站点是 2b）
         base = layer['name'].lower()
+        if base == self.base_name:
+            base = self.base_key
         if base in used:
             used[base] += 1
             key = f'{base}_{used[base]}'
@@ -275,11 +281,11 @@ class PaintingExporter:
             layout[key] = entry
             files.extend(layer_files)
 
-        if self.base_name not in layout:
+        if self.base_key not in layout:
             raise ValueError('没有导出基底层')
 
         # view 只有基底层有，客户端用它算整张立绘的缩放
-        layout[self.base_name]['view'] = _vec2(
+        layout[self.base_key]['view'] = _vec2(
             self.frame.m_SizeDelta) if self.frame is not None else [0.0, 0.0]
 
         if self.face_node is not None and self.face_mono is not None and face_images:
@@ -293,7 +299,7 @@ class PaintingExporter:
             files.extend(face_images)
 
         # 基底层排最前，其余按名字排序，保证多次运行字节稳定
-        ordered = {self.base_name: layout.pop(self.base_name)}
+        ordered = {self.base_key: layout.pop(self.base_key)}
         for key in sorted(layout):
             ordered[key] = layout[key]
 

@@ -604,11 +604,24 @@ def export_texture_bundle(bundle: Path, dest_dir: Path,
 
 
 def export_painting(bundle: Path, cache: Path, path_map: dict, cdn: str,
-                    public: Path, name: str, face_bundle: Path | None = None) -> dict:
-    """立绘 → public/painting/<name>/{json, png, obj}（格式与站点仓库逐项对齐）。"""
+                    public: Path, name: str, face_bundle: Path | None = None,
+                    out_dir: str | None = None) -> dict:
+    """立绘 → public/painting/<name>/{json, png, obj}（格式与站点仓库逐项对齐）。
+
+    `<name>_ex` 是改造版（同人改造/换装），游戏里是**独立资源包**，包内基底层
+    叫 `<name>_ex`。产物写进本体目录（`out_dir` 给本体名），json 名仍是
+    `<name>_ex.json`；但 json 里的基底层 key 必须写成本体名 —— 前端取基底
+    尺寸与枢轴用的是 `json[name]`，name 是本体重绘名。
+
+    为什么敢写进本体目录：`_ex` 包的 externals 直接指向本体的 `<name>_tex`
+    （8 个变体全部如此，见 docs/CDN.md §4.9），它没有自己的基底贴图，
+    所以基底层写出来的字节与本体的完全一致，覆盖是空操作。下面留了一道
+    兜底：万一下次真不一致，还原本体文件并告警，而不是静默改掉本体。
+    """
     import painting_site as P
     merger = PaintingMerger(bundle, cache, path_map, cdn)
-    exporter = P.PaintingExporter(merger, name)
+    base_key = name[:-3] if name.endswith('_ex') else name
+    exporter = P.PaintingExporter(merger, name, base_key)
     exporter.collect()
 
     faces: list[Path] = []
@@ -621,7 +634,24 @@ def export_painting(bundle: Path, cache: Path, path_map: dict, cdn: str,
             if first is not None:
                 face_size = [float(first.shape[1]), float(first.shape[0])]
 
-    info = exporter.export(public / 'painting' / name, faces, face_size)
+    dest = public / 'painting' / (out_dir or name)
+    guard = None
+    if out_dir and out_dir != name:
+        shared = dest / f'{base_key}.png'
+        if shared.exists():
+            guard = (shared, shared.read_bytes())
+
+    info = exporter.export(dest, faces, face_size)
+
+    if guard is not None:
+        shared, old_bytes = guard
+        if shared.read_bytes() != old_bytes:
+            shared.write_bytes(old_bytes)
+            warn(f'{name}: 基底层与本体重名但内容不同，已还原本体文件 —— '
+                 f'这个 _ex 得改用独立目录')
+            info['skipped'].append(f'{base_key}(基底贴图与本体不一致)')
+            info['files'] = [f for f in info['files'] if f != shared]
+
     info['files'] = list(info['files']) + faces
     return info
 
@@ -737,6 +767,12 @@ def main() -> int:
             continue
         prefix = SOURCE_PREFIX.get(item, item)
         targets = {p: v for p, v in mapping.items() if p.startswith(prefix + '/')}
+        # 判断 `_ex` 变体是否成立：<name>_ex 的 `<name>` 必须本身是个立绘。
+        # 这样 `yan_n_ex` 会归到 `yan_n`（清单里确实有 yan_n），而不是 `yan_n` 之外的野路径。
+        base_names = ({p.split('/', 1)[1].lower() for p in mapping
+                       if p.startswith('painting/')
+                       and not p.endswith(('_tex', '-mesh'))}
+                      if item == 'painting' else set())
         if not targets:
             warn(f'清单里没有 {prefix}/ 开头的资源')
             continue
@@ -770,7 +806,11 @@ def main() -> int:
                 if scoped and name in used:
                     warn(f'{path} 是和谐版但被 data 引用了 —— 跳过会缺图，需要人工确认')
                 continue
-            if scoped and name not in used:
+            # 改造版（`<name>_ex`）是独立资源包，本身不进引用集，跟随本体：
+            # 本体被 data 引用就导，否则跳过。
+            is_ex = name.endswith('_ex') and name[:-3] in base_names
+            scope_name = name[:-3] if is_ex else name
+            if scoped and scope_name not in used:
                 report['unused'] += 1
                 continue
 
@@ -779,7 +819,9 @@ def main() -> int:
             key = f'{item}:{path}:{face_info["md5"] if face_info else "-"}'
 
             if item == 'painting':
-                marker_file = public / 'painting' / name / f'{name}.json'
+                marker_file = (public / 'painting' / scope_name / f'{name}.json'
+                               if is_ex else
+                               public / 'painting' / name / f'{name}.json')
             else:
                 marker_file = public / item / f'{name}.png'
 
@@ -839,7 +881,8 @@ def main() -> int:
                             download_bundle(cdn, face_info['md5'], face_bundle,
                                             face_info['size'])
                     result = export_painting(cached, cache, path_map, cdn,
-                                             public, name, face_bundle)
+                                             public, name, face_bundle,
+                                             out_dir=scope_name if is_ex else None)
                     files = result['files']
                     if result['skipped']:
                         log(f'  {name}: 跳过图层 {result["skipped"]}')

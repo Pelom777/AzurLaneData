@@ -479,6 +479,59 @@ bisimaiz (RectTransform, 有 m_Sprite)          ← 导出成基底层
 图层命名：`part` / `part_2`（旧仓库当年是 `bisimaiz_rw0` / `rw1`，因为那时节点名就是那个）。
 前端只用 key 拼文件名，功能无差别，不做额外美化。
 
+## 4.10 改造版 `<name>_ex`：独立资源包，产物写进本体目录
+
+游戏里 `painting/<name>_ex` 是**独立资源包**，不是本体包里的一个节点。
+旧仓库把它的产物平铺在本体目录里：`public/painting/yan/yan_ex.json` +
+`yan_rw_ex.png`。我们照这个布局。
+
+### 三个必须对齐的事实
+
+1. **包内基底层叫 `<name>_ex`，但 json 里的 key 必须写回本体名 `<name>`。**
+   前端 `loadPainting(name, json)` 取基底尺寸与枢轴用的是 `json[name]`：
+
+   ```js
+   const baseSize = json[name]['size']
+   ```
+
+   key 写成 `yan_ex` 会直接读到 `undefined`，整张立绘崩掉。
+
+2. **产物写进本体目录是安全的。** 8 个 `_ex` 包的 externals 全部指向
+   本体的 `<name>_tex` / `<name>_front_tex`（外加自己的 `<name>_rw_ex_tex`），
+   也就是说它**没有自己的基底贴图**，写出来的 `yan.png` 与本体的逐字节相同，
+   覆盖是空操作。实测 `yan.png` 导出前后 md5 一致。
+
+   代码里仍留了一道兜底：写进本体目录前先留底，写完发现基底层字节变了就
+   **还原并告警**，绝不静默改掉本体。
+
+3. **`_ex` 不在引用集里，要跟随本体。** `public/data` 引用的是 `yan`，没有
+   `yan_ex`。所以引用集判断要先剥掉 `_ex` 后缀：
+
+   ```python
+   is_ex = name.endswith('_ex') and name[:-3] in base_names
+   scope_name = name[:-3] if is_ex else name
+   ```
+
+   `base_names` 是清单里「本身是个立绘」的集合，所以 `yan_n_ex` 会归到
+   `yan_n`（清单里确实有），而不是凭空造一个 `yan_n`。
+
+### 前端改动：0 行
+
+现有代码拼的就是 `painting/${name}/${name}${ex.value ? '_ex' : ''}.json`，
+和本布局完全一致。图层也用同一个 `name` 目录，不需要额外参数。
+
+### 覆盖范围
+
+清单里 15 个 `_ex` 条目，其中 8 个本体在引用集里：
+
+```text
+banjiu  feiniao  gaoxiong_6  xishao  xuebugui  xuequan  yan  zi_shanluan
+```
+
+其余 7 个是 `_n_ex`（`_n` 变体不在引用集里），跳过。
+每个 `_ex` 只多产 3 个文件（`<name>_ex.json` + `<name>_rw_ex.png` + mesh），
+基底与正面贴图复用本体的，不重复占空间。
+
 ## 5. 增量同步（CI）
 
 ### 5.1 凭据：4 个 secrets
