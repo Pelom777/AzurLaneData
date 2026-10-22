@@ -30,7 +30,7 @@
 | `squareicon` | 2,164 | 42.1 MB | 0.6% | ✅ |
 | `equipicon` | 495 | 5.9 MB | 0.1% | ✅ |
 | `voteicon` | 8 | 1.6 MB | 0.0% | ❌ |
-| `data` | 21 | 0.7 MB | — | 走 git，不走 CDN |
+| `data` | 21 | 0.7 MB | — | 进 R2 的 `data/`（前端 `VITE_CDN` 指向它） |
 | `iconbackground` / `iconframe` / `squareback` / `spinebase` / `juusui` / `_headers` | 43 | 0.6 MB | 0.0% | 部分 |
 | **合计** | **19,443** | **6,985.2 MB** | | |
 
@@ -46,7 +46,7 @@
 |---|---:|---:|---|---|
 | **A. 自动生成** | 12,947 | 5.71 GB | `azl_assets.py` | 每次热更增量跑 |
 | **B. 一次性搬运** | 6,475 | 1.12 GB | 旧仓库 `public/` | 搬一次，此后不动 |
-| **C. 数据** | 21 | 0.7 MB | `build_data.py` | 走 git，不进 R2 |
+| **C. 数据** | 21 | 0.7 MB | `build_data.py` | 进 R2 的 `data/`，由 `update-data.yml` 发布 |
 
 A 类对应 `CATEGORY_LIST` 里实际有产物的 6 个目录：`painting`、`paintingface`、
 `squareicon`、`shipicon`、`equipicon`、`iconframe`。
@@ -228,6 +228,11 @@ rclone copy public r2:azurlane-assets \
   --s3-no-check-bucket --transfers 16 --checkers 32 -P \
   --header-upload "Cache-Control: public, max-age=86400"
 ```
+
+> 这里排除 `data/**` 是有意的：资产走播种（一次性、6.8 GB），
+> 数据走 `update-data.yml`（每小时、21 个文件、短缓存）。
+> 两条链路的缓存头不同，混一次传会把 json 也标成 `max-age=86400`。
+> 播种完之后跑一次 `update-data.yml`（`force=true`）就会把 `data/` 补上。
 
 耗时参考（6.8 GB）：
 
@@ -551,8 +556,10 @@ r2.dev 因为没有 Cache 规则，实际上只看对象上的 `Cache-Control` �
 
 ## 8. 验收标准
 
-- [ ] R2 桶内对象数 = `19,443 - 21(data) = 19,422`（spine 含在内）
+- [ ] R2 桶内对象数 = `19,422(资产) + 21(data) = 19,443`（spine 含在内）
       当前 **2**（联调产物 `squareicon/22.png`、`33.png`），等首次播种
+- [ ] `data/` 下 21 个 json 可从 CDN 读到，且 `Cache-Control` 是
+      `public, max-age=300, stale-while-revalidate=60`（不能是长缓存）
 - [x] 公共读可用：`GET /squareicon/22.png` → `200` `image/png` 27,131 字节，
       md5 `68c03aeb…` 与桶内一致；不存在 key → `404`（2026-10-21）
 - [ ] 任意抽 5 张立绘，`curl` 回来的字节数与原文件一致（原样托管，不做转码）

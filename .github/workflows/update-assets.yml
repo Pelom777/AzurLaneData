@@ -1,7 +1,8 @@
 name: update-assets
 
-# 资源链路的**唯一**入口。热更新和全量重建走同一份代码，
-# 只差一个 `shards` 参数：热更新 shards=1，全量重建 shards=6。
+# 资源链路的**唯一**入口。热更新和全量重建不需要人区分 —— prep job 先盘点
+# 「state 里有多少资源已过期或缺失」，再按每片 400 个算出要分几片。
+# 热更新盘出来是几十个 → 1 片；全量是几千个 → 6~7 片。人不用管。
 #
 # 为什么合并（2026-10-22）
 # ----------------------
@@ -16,16 +17,17 @@ name: update-assets
 # 现在统一为：**默认不用 seed**，需要时用 `seed=true` 显式打开，
 # 并且只该用在一件事上：把已由别的途径入库的存量资产接进台账。
 #
-# 分片（为什么它是唯一真正的差异）
+# 分片（唯一与环境相关的那部分）
 # ------------------------------
-# 热更新一次只动几十个资源，单 job 几分钟跑完，不需要分片。
+# 热更新一次只动几十个资源，单 job 几分钟跑完。
 # 全量重建约 2,491 张 / 下载 3.7 GB / 产物 5.6 GB，托管 runner 的 / 只有
 # 约 14 GB，单 job 峰值 9.3 GB 且中途无法回收 —— 必须按 crc32(名字) % N
 # 切成 N 片，每片跑完立刻上传丢弃。分片键用 crc32 而不是 hash()：
 # 后者按进程随机化，换一次进程分片就飘了。
 #
-# 这个合并的代价：热更新会多两个 job（prep 5s + merge 40s），
-# 单次运行比原来慢约 45 秒。换来的是只有一个入口、一套语义。
+# 分几片由 prep 的盘点结果算：ceil(pending / 400)，上限 16。
+# 400 这个数按 painting 标定（单张约 1.5 MB 下载 + 3.3 MB 产物 ≈ 4.8 MB，
+# 400 个 ≈ 1.9 GB 峰值）。想强制指定就填 shards=1..16，0 表示自动。
 #
 # 「以后更新时也能用」靠的是 state 继承，不是每次重跑
 # --------------------------------------------------
@@ -46,8 +48,8 @@ on:
         default: "painting paintingface squareicon shipicon equipicon iconframe"
         type: string
       shards:
-        description: "分片数：热更新用 1；全量重建用 6（每片约 1.6 GB）"
-        default: "1"
+        description: "分片数：0=按待处理量自动决定（默认）；1..16=强制指定"
+        default: "0"
         type: string
       scope:
         description: "used=只导 public/data 引用到的；all=清单全导"
@@ -89,28 +91,69 @@ env:
   RCLONE_CONFIG_R2_REGION: auto
 
 jobs:
-  # 把"分片数"变成真正的矩阵数组。写死 [0,1,2,3,4,5] 的话改 shards 输入不会
-  # 生效，那个输入就是假的。
+  # 先盘点再决定分几片 —— 这样"热更新还是全量"不再需要人来判断。
+  #
+  # 盘点走的是与正式运行**完全相同**的枚举与过滤（azl_assets.py --plan 就是
+  # 主循环里的一个分支），所以这个数不会和实际工作量漂移。
+  # 判据是"state 里的 md5 与当前清单不一致"；刻意不看产物是否在磁盘 ——
+  # CI 是干净 checkout，带上那一半判据会把已是最新的资源全算成待处理。
+  # 拿到的是**下界**：远端对象丢失也会产生真实工作量，但那属于自愈，不该影响分片。
+  #
+  # 这个 job 不装任何第三方依赖：azl_assets.py 的 cv2 / UnityPy 都是函数内导入，
+  # 盘点模式走不到。整个 job 约 20 秒。
   prep:
     runs-on: ubuntu-latest
     outputs:
-      shards: ${{ steps.gen.outputs.shards }}
+      shards: ${{ steps.decide.outputs.shards }}
+      n: ${{ steps.decide.outputs.n }}
+      pending: ${{ steps.plan.outputs.pending }}
     steps:
-      - name: 生成分片矩阵
-        id: gen
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 盘点待处理量
+        id: plan
         run: |
-          N="${{ inputs.shards }}"
-          case "$N" in ''|*[!0-9]*)
-            echo "::error::shards 必须是整数，收到 '$N'"; exit 1 ;;
+          ARGS="--plan --server $SERVER --public public --cache .azl/bundles \
+                --state .azl/assets-state.json --scope ${{ inputs.scope }} \
+                --items ${{ inputs.items }}"
+          # force 意味着"全部重做"，此时盘点也不该走 state 缓存
+          if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
+          python scripts/azl_assets.py $ARGS
+
+      - name: 决定分片数
+        id: decide
+        run: |
+          PENDING="${{ steps.plan.outputs.pending }}"
+          OVERRIDE="${{ inputs.shards }}"
+          # 每片 400 个是按 painting 标定的：单张约 1.5 MB 下载 + 3.3 MB 产物，
+          # 400 个 ≈ 1.9 GB 峰值，安全落在 runner 的 14 GB 磁盘内（阈值取 6 GB）。
+          PER_SHARD=400
+          case "$OVERRIDE" in
+            ''|0) N=$(( (PENDING + PER_SHARD - 1) / PER_SHARD )) ;;
+            *[!0-9]*) echo "::error::shards 必须是非负整数，收到 '$OVERRIDE'"; exit 1 ;;
+            *) N="$OVERRIDE" ;;
           esac
-          if [ "$N" -lt 1 ] || [ "$N" -gt 16 ]; then
-            echo "::error::shards 取 1..16，收到 $N"; exit 1
-          fi
-          if [ "$N" = "1" ] && [ "${{ inputs.force }}" = "true" ]; then
-            echo "::warning::shards=1 且 force=true：这会把全量压到一个 job 上，可能要跑两小时。"
-            echo "::warning::全量重建请改用 shards=6。"
+          [ "$N" -lt 1 ] && N=1
+          if [ "$N" -gt 16 ]; then
+            echo "::warning::算出 $N 片，超过上限 16，按 16 跑（每片约 $((PENDING / 16)) 个）"
+            N=16
           fi
           echo "shards=$(python3 -c 'import json,sys;print(json.dumps(list(range(int(sys.argv[1])))))' "$N")" >> "$GITHUB_OUTPUT"
+          echo "n=$N" >> "$GITHUB_OUTPUT"
+          echo "待处理 $PENDING 个 → $N 片（每片上限 $PER_SHARD 个）"
+          {
+            echo "### 盘点"
+            echo
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 待处理（state 过期或缺失） | **$PENDING** |"
+            echo "| 已是最新 | ${{ steps.plan.outputs.up_to_date }} |"
+            echo "| 分片数 | **$N** |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   assets:
     needs: prep
@@ -213,7 +256,7 @@ jobs:
         id: gen
         run: |
           SHARD="${{ matrix.shard }}"
-          N="${{ inputs.shards }}"
+          N="${{ needs.prep.outputs.n }}"
           ARGS="--server $SERVER --public public --cache .azl/bundles \
                 --state .azl/state-$SHARD.json --scope ${{ inputs.scope }} \
                 --items ${{ inputs.items }} --shard $SHARD/$N \
@@ -259,7 +302,7 @@ jobs:
           disk=$(df -Pm / | awk 'NR==2{print $4}')
           out=$(du -sm public 2>/dev/null | awk '{print $1}')
           {
-            echo "### 分片 $shard/${{ inputs.shards }}"
+            echo "### 分片 $shard/${{ needs.prep.outputs.n }}"
             echo
             echo "| 项 | 值 |"
             echo "|---|---|"
@@ -390,7 +433,7 @@ jobs:
             exit 0
           fi
           python scripts/commit.py --paths .azl/assets-state.json \
-            --message "assets: 新增 ${{ steps.merge.outputs.new }} / 变更 ${{ steps.merge.outputs.changed }}（${{ inputs.shards }} 片）"
+            --message "assets: 新增 ${{ steps.merge.outputs.new }} / 变更 ${{ steps.merge.outputs.changed }}（${{ needs.prep.outputs.n }} 片）"
 
       - name: 摘要
         if: always()
@@ -401,7 +444,7 @@ jobs:
             echo "| 项 | 值 |"
             echo "|---|---|"
             echo "| 类别 | \`${{ inputs.items }}\` |"
-            echo "| 分片 | ${{ inputs.shards }} |"
+            echo "| 待处理 / 分片 | ${{ needs.prep.outputs.pending }} / ${{ needs.prep.outputs.n }} |"
             echo "| scope / limit / seed / force | ${{ inputs.scope }} / ${{ inputs.limit }} / ${{ inputs.seed }} / ${{ inputs.force }} |"
             echo "| 新增 / 变更 / 失败 | ${{ steps.merge.outputs.new || '-' }} / ${{ steps.merge.outputs.changed || '-' }} / ${{ steps.merge.outputs.failed || '-' }} |"
             echo "| 写出文件 | ${{ steps.merge.outputs.files || '-' }} |"

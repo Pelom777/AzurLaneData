@@ -4,48 +4,59 @@
 
 ---
 
-我在给碧蓝航线数据站做自动化仓库拆分。已经有一个**采集并交接完成**的新仓库骨架在
-`D:\Projects\AzurLaneData`（远端计划叫 `Pelom777/AzurLaneData`），你的任务是把它从骨架
-跑成真正能用的流水线。
+我在给碧蓝航线数据站做仓库拆分，目前**解包链路已经端到端跑通**，剩下的是发布与拆分。
 
-**第一步**：读 `D:\Projects\AzurLaneData\docs\HANDOFF.md`。里面有目标的完整描述、
-已验证的技术事实、未验证的风险、分阶段实施步骤和验收标准。按它走，不要自己重新设计。
+**工作目录**：`D:\Projects\AzurLaneData`（远端 `Pelom777/AzurLaneData`）
 
-背景一句话：过去数据靠 `git sparse-checkout` 拉第三方仓库
-`AzurLaneTools/AzurLaneLuaScripts`，现在要改成**自己从游戏 CDN 解包 Lua**。
-解包链路已经摸清（两条：`sharecfgdata` 走 uleb128 分段 + bcdec + ljd；
-`scripts32` 走 uabdec + UnityPy + bcdec + ljd），工具二进制已放在 `tools/`。
+**先读这三份，按顺序**：
 
-**请按这个顺序做**：
+1. `docs/HANDOFF.md` —— 架构、技术链路、容量算账、分阶段步骤
+2. `docs/VERIFICATION.md` —— 阶段 0–2 的验收数字（已通过，别重做）
+3. `docs/CDN.md` —— R2 资产分发的全部细节（已落地）
 
-1. **先打通阶段 0**（HANDOFF §7 阶段 0）。只解一张 `weapon_name` 表，
-   证明 `bcdec` → `ljd` → `luatable` 这条链在 9.7 版本上还能走通。
-   这是最大的风险点，P0。**跑不通就不要往下做**，把失败点报给我。
+**当前架构，一句话**：三个角色各干一件事，别混。
 
-2. 通过后做阶段 1：全量解包 + `build_data` + `check_data_contract`，
-   **并且用旧链路（`scripts/legacy/fetch_lua_tables.py`）在同一个版本上跑一遍，
-   diff 两份 json**。这是判断"自己解包出来的和 `AzurLaneLuaScripts` 是否等价"的
-   唯一可靠办法 —— 不要比 lua 文本，ljd 输出本来就可能因为版本差异而不同，
-   但 json 里的数据必须一样（HANDOFF §4.1）。
+| 角色 | 干什么 |
+|---|---|
+| `Pelom777/AzurLaneTools` | **前端仓库**，Cloudflare Pages 的唯一构建源。`public/` 会被清空 |
+| `Pelom777/AzurLaneData`（= 当前目录） | **自动构建仓库**，跑 Actions 解包+构建+发布，**不对外提供任何内容** |
+| R2 bucket | **唯一内容源**，存 19,422 个图片资产 + `data/` 下 21 个 json |
 
-3. 再做阶段 2：让 `.github/workflows/update-data.yml` 在 GitHub 上真正跑起来，
-   包括 `actions/cache` 命中验证、`check_version` 跳过逻辑验证。
+所以 `AzurLaneData` 公开还是私有，跟站点能不能跑没有关系 —— 没有任何人从 GitHub 读它。
 
-4. 阶段 3、4（资产搬迁、切换）我确认过前两步之后再动。
+**你的任务，按顺序**：
+
+1. **验证 data 发布到 R2**（唯一剩下的 P0）。我给 `update-data.yml` 加了三步
+   （装 rclone / 查凭据 / `rclone copy public/data`），但**还没跑过**。
+   跑一次 `force=true, dry_run=false`，确认：
+   - R2 的 `data/` 出现 21 个对象
+   - `curl -I` 回来 `Cache-Control: public, max-age=300`
+   - 内容与本地逐字节一致
+
+2. **前端拆分**：`AzurLaneTools` 删 `public/`，`vite.config.ts` 加
+   `copyPublicDir: false`，`.env.development` 的 `VITE_CDN` 改成 R2 域名。
+   然后全量回归：图片全来自 CDN，数据面板无 NaN / 白屏。
+
+3. **停掉旧链路**：`D:\Files\WorkBuddy\2026-10-20-16-11-15\azurlane-automation`
+   里的 workflow 停用。它只作参考，不再演进。
 
 **几条硬约束**：
 
-- 现有 `build_data.py` / `build_data_impl.py` / `check_data_contract.py` 的
-  **语义不要改**。它们是前端契约的来源。要改先告诉我为什么。
-- 不要往 git 里提交图片资产（6.82 GB）。原因见 HANDOFF §6。
+- `build_data.py` / `build_data_impl.py` / `check_data_contract.py` 的**语义不要改**，
+  它们是前端契约的来源。要改先问我为什么。
+- 图片资产 6.82 GB **绝不进 git**，只走 R2（`rclone`）。
 - 每小时 cron 只做版本检查，`azhash` 没变就直接结束，不要无条件 commit。
-- 改动前先跑 `python -m py_compile scripts/*.py` 和 `python scripts/check_data_contract.py`。
-- 任何"看起来成功了"的结论，都要给一条可复查的证据（文件大小、条目数、diff 行数）。
+- `data/` 的缓存头必须是**短缓存**（`max-age=300`），长了前端会在游戏更新后读到旧值。
+  图片相反，要长缓存（`immutable`）。
+- 任何"看起来成功了"的结论，都要给一条可复查的证据（对象数、字节数、diff 行数）。
 
-**我手上有**：游戏的 CN 服可访问、GitHub 推权限、`D:\Projects\AzurLaneData` 的写权限。
-**我没有**：GHCR 的 token（所以官方 Docker 镜像用不了，必须用 `tools/` 里的二进制）。
+**环境限制**：本地是 Windows，`tools/bcdec` 和 `tools/uabdec` 是 **Linux 静态 32 位 ELF**，
+本地跑不了。验证解包请用 CI（`p0-probe.yml`），不要试图在本地装 WSL 绕。
 
-遇到需要我决策的岔路，停下来问，不要自己拍。
+**我没有**：GHCR 的 token（官方 Docker 镜像 `ghcr.io/azurlanetools/azex/azex` 是私有的，
+用不了，只能靠 `tools/` 里的二进制）。
+
+遇到需要我拍板的岔路，停下来问。
 
 ---
 
@@ -54,8 +65,10 @@
 | 项 | 值 |
 |---|---|
 | 本地路径 | `D:\Projects\AzurLaneData` |
-| 上游前端仓库 | `Pelom777/AzurLaneTools` |
-| 旧自动化仓库 | `D:\Files\WorkBuddy\2026-10-20-16-11-15\azurlane-automation`（只作参考，不再演进） |
-| 目标 CDN | `https://cdn.al.pelom.cn`（自建服务器） |
+| 前端仓库 | `Pelom777/AzurLaneTools`（Pages 源，public 待清空） |
+| 旧自动化仓库 | `D:\Files\WorkBuddy\2026-10-20-16-11-15\azurlane-automation`（只作回退参考） |
+| CDN | R2 bucket `azurlane-assets`，经 `r2.dev` 或 `cdn.al.pelom.cn` |
 | 游戏服务器 | CN 为主，`az` 清单 64,649 条 |
-| 当前实测版本 | 9.7.25 / azhash 9.7.398 |
+| 已验收版本 | 9.7.25 / azhash `9.7.398` / 36 张表 236,150 条 |
+| 已完成阶段 | 0（解包）、0.5（基线）、1（全量）、2（CI） |
+| 待办阶段 | 2.5（data 发布）、3（资产与前端拆分）、4（切换） |

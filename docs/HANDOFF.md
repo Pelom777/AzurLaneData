@@ -109,15 +109,29 @@ scripts32（整体加密的 UnityFS，头也不是 UnityFS）
 | 下游只需要 7 张表 | `build_data_impl.py` 只用 `ship_data_statistics` / `ship_data_template` / `ship_skin_template` / `ship_data_strengthen` / `ship_data_trans` / `transform_data_template` / `attribute_info_by_type` |
 | 现有下游可复用 | `build_data.py --raw raw --out public/data` 的入参就是 `{表名}.json` |
 
-### 未验证（新任务里必须最先打掉的）
+### 已通过（2026-10-21，数字固化在 `docs/VERIFICATION.md`）
 
-| 风险 | 等级 | 怎么验 |
+| 项 | 结果 |
+|---|---|
+| `bcdec` 还原 9.7 字节码 | ✅ 2422/2422 段，1.0 s，输出均以 `1b 4c 4a 02 02` 开头 |
+| `ljd` 逐段反编译 | ✅ 2422/2422，2.7 s |
+| `weapon_name` 与旧链路比 | ✅ **逐字节相同**（`cmp` 无差异，2422 = 2422） |
+| `uabdec` + UnityPy 解 `scripts32` | ✅ 4 张 sharecfg 表全部取出，与旧链路逐字节相同 |
+| `ljd` 在 Python 3.11 | ✅ 能装能跑（0.1.7 是 `py3-none-any`） |
+| 全量 36 张表 | ✅ 236,150 条 / 1266 s / 失败 0 |
+| 新旧链路 21 个产物 | ✅ **全部一致，0 差异** |
+| CI 端到端 | ✅ 三轮全绿，缓存命中后解包 50.5 s（25×） |
+
+结论：**解包链路已跑通，不需要再"验证可行性"**。剩下的工作是发布与拆分，
+见 §7 的阶段 3 起。
+
+### 仍未验证
+
+| 风险 | 等级 | 说明 |
 |---|---|---|
-| `bcdec` 能否还原 9.7 的字节码 | **P0** | 解开一个 `sharecfgdata`，看 `ljd` 能否出源码 |
-| `ljd` 反编译质量与耗时 | **P0** | 先只跑 `ship_data_statistics`，记录耗时与条数 |
-| `uabdec` 能否解开 9.7 的 `scripts32` | **P0** | 解开后 UnityPy 能否 load、TextAsset 数量是否合理 |
-| `ljd` 0.1.7 在 Python 3.11 能否装 | P1 | `pip install` 试；不行就降 3.8（官方用 3.8） |
-| 反编译出的 lua 是否被 `luatable.py` 吃下 | P1 | `parse_text` 返回的表数与字段是否齐全 |
+| `data` 发布到 R2 的步骤 | **P0** | `update-data.yml` 新增的三步（装 rclone / 查凭据 / 发布）尚未跑过 |
+| R2 上 `data/` 的缓存头 | P1 | 必须是 `max-age=300`，长缓存会让前端读到旧值 |
+| `spine` 无法自动生成 | P1 | 1.10 GB，只能从旧仓库搬一次；新船的 Live2D 会缺，需前端 fallback |
 
 **已排除**：原来怀疑"CDN 只有 32 张、旧链路 35 张对不上"。查清了 —— 差的 3 张是
 `barrage_template` / `bullet_template` / `weapon_property`（无后缀），是游戏把大表
@@ -126,46 +140,67 @@ scripts32（整体加密的 UnityFS，头也不是 UnityFS）
 
 ### 4.1 我们的产出和 `AzurLaneLuaScripts` 一样吗
 
-分三层，别混为一谈：
+**已经是实测结论，不再是推断**：
 
 | 层 | 结论 | 依据 |
 |---|---|---|
-| **数据**（json 里的字段值） | **应当完全一样** | 同一个 bundle（md5 相同）、同一条链路（uleb128 分段 → bcdec → ljd）。已用一个样本交叉验证：219 段 = 219 条 |
-| **lua 文本**（中间产物） | **不保证逐字节一样，也不重要** | `bcdec` 版本可能不同（本地是 2023 年的，官方镜像可能是新版）、`ljd` 版本不同、浮点格式化差异 |
+| **数据**（json 字段值） | **完全一样** | 21 个产物新旧链路 diff，0 差异（`VERIFICATION.md` 阶段 1） |
+| **lua 文本** | 这个样本**逐字节相同** | `cmp` 无差异；但换版本后 `bcdec`/`ljd` 版本差异可能导致文本不同，届时仍以 json 为准 |
 | **文件集合** | 少 3 个遗留表 | 见上，不影响产出 |
-
-所以验收不能比 lua 文本，要比 **json**：
-
-```bash
-# 同一版本下，新链路与旧链路各跑一次，diff 两份 json
-python scripts/unpack_lua.py --server CN --out raw_new --work work
-python scripts/legacy/fetch_lua_tables.py --server CN --dst /tmp/lua --out raw_old
-python scripts/build_data.py --raw raw_new --out out_new
-python scripts/build_data.py --raw raw_old --out out_old
-diff -r out_new out_old        # 期望：无差异，或只有已知的游戏侧改动
-```
-
-这条命令是阶段 1 的**真正验收标准**，比对条数更能说明问题。
-若出现差异，优先怀疑 `bcdec` 版本 —— 那是唯一一个"输入相同但行为可能变"的环节。
-
-**P0 全部通过之前，不要动 `AzurLaneTools` 的 `public/`。** 现有链路是保底方案。
 
 ---
 
-## 5. 仓库结构
+## 5. 部署架构：三个角色，别混
+
+拆分之后一共三样东西，各自只干一件事。**搞混任何一对都会带出多余的成本。**
+
+| 角色 | 是什么 | 干什么 | 谁读它 |
+|---|---|---|---|
+| `Pelom777/AzurLaneTools` | **前端仓库** | 只放源码。`public/` 会在拆分时清空 | Cloudflare Pages（唯一构建源） |
+| `Pelom777/AzurLaneData` | **自动构建仓库**（本仓库） | 跑 Actions：解包 → 构建 → 推 R2。**不对外提供任何内容** | 没有人 |
+| R2 bucket | **唯一的内容源** | 19,422 个图片资产 + `data/` 下 21 个 json | 浏览器（经 `cdn.al.pelom.cn`） |
 
 ```
-AzurLaneData/
+     游戏 CDN
+        │  解包 + 构建（GitHub Actions，每小时检查）
+        ▼
+  AzurLaneData ──push──► R2 bucket ──CNAME──► cdn.al.pelom.cn ──┐
+        │                                                      │
+        └─ 只 commit 数据快照与状态（供下次构建当输入）          │  fetch
+                                                               ▼
+  AzurLaneTools ──git push──► Cloudflare Pages ──构建──► al.pelom.cn
+        （前端源码，不含 public/）                    （js/css/html）
+```
+
+三条由此推出的结论：
+
+1. **`AzurLaneData` 的 `public/` 里只有 `data/`**。资产不进工作区（生成在临时目录
+   直接推 R2），所以这个仓库始终只有十几 MB。`public/data` 是 `build_data.py`
+   的输出目录，同时也是下一轮的 `prev_dir`。
+2. **Pages 不连接 `AzurLaneData`**，所以这个仓库公开还是私有，跟站点能不能跑
+   没有半点关系。
+3. **`AzurLaneTools` 的 `public/` 清空后必须改 `.env.development`**。
+   原来 `vite dev` 靠 `public/` 当静态根（`VITE_CDN=http://127.0.0.1:5173`），
+   目录没了会 404 一片。改成 `VITE_CDN=https://cdn.al.pelom.cn` 即可 ——
+   这是拆分后前端唯一需要改的配置。
+
+---
+
+## 5.1 仓库结构
+
+```
+AzurLaneData/                    ← 纯构建机，无 public/
 ├── .github/workflows/
-│   └── update-data.yml          # 每小时：查版本 → 变了才解包 → 建数据 → 提交
+│   └── build.yml                # 每小时查版本 → 变了才解包 → 构建 → 推 R2
 ├── docs/
 │   ├── HANDOFF.md               # 本文
 │   ├── PROMPT.md                # 新任务的提示词
-│   └── AUTOMATION.md            # 旧仓库的链路文档（资产部分仍然有效）
+│   └── AUTOMATION.md            # 旧仓库链路文档（资产部分仍有效）
 ├── scripts/
 │   ├── check_version.py         # ★新：azhash 比对，决定要不要干活
 │   ├── unpack_lua.py            # ★新：自解包（两条链路）
 │   ├── track_new.py             # ★新：new.json 台账
+│   ├── sync_r2.py               # ★新：把产物推到 R2（rclone 或 boto3）
 │   ├── build_data.py            # 搬入：适配层，不改
 │   ├── build_data_impl.py       # 搬入：12 位属性 / 油耗 / transform，不改
 │   ├── check_data_contract.py   # 搬入：前端契约门禁，不改
@@ -173,35 +208,47 @@ AzurLaneData/
 │   ├── luatable.py              # 搬入：lua 表解析器
 │   ├── common.py                # 搬入：日志 / git / 输出
 │   ├── commit.py                # 搬入：只提交明确列出的路径
-│   ├── azl_assets.py            # 搬入：图片链路（立绘 / 图标），已实测可用
-│   └── legacy/                  # 旧链路（sparse-checkout 拉第三方仓库），仅回退用
-│       ├── fetch_lua_tables.py
-│       └── sync_upstream.py
+│   ├── azl_assets.py            # 搬入：图片链路，已实测可用
+│   └── legacy/                  # 旧链路，仅回退用
 ├── tools/
 │   ├── bcdec / uabdec           # 32 位 x86 ELF，见 tools/README.md
 │   └── README.md
-├── data/
+├── data/                        # 状态与台账（不进 R2，只进 git）
 │   ├── version.json             # {服务器: {az, version, checked_at}}
-│   └── new-ledger.json          # new.json 的累积台账（前端不读）
-├── public/data/                 # ★ 产出：ship / skin / option / ship-attr / new.json
-└── .gitignore                   # 资产目录全部忽略
+│   └── new-ledger.json          # 新增台账的累积记录
+├── public/data/                 # 产物：ship / skin / option / ship-attr /
+│                                #       new.json / new-latest.json
+└── .gitignore
 ```
 
-`scripts/` 里除标 ★ 的四个，其余是从 `azurlane-automation` 原样搬来的，
-**逻辑一行没改**。改动只发生在外部接口层。
+`public/data/` 为什么既进 git 又要推 R2：`build_data_impl.build_ship_attr(raw, prev_dir)`
+是合并式的，`transform` / `gear_score` 推不出时保留旧值 —— 它需要上一版的
+`ship-attr.json` 当输入。所以这个目录不是"发布物"，是**构建输入 + 台账**，
+顺便推一份给浏览器读。数据量只有 0.7 MB / 21 个文件，git 装得下。
+
+`scripts/` 里除标 ★ 的，其余从 `azurlane-automation` 原样搬来，**逻辑一行没改**。
 
 ---
 
-## 6. 容量：GitHub 放得下什么
+## 6. 容量：三处存储各放什么
 
 这是本方案最容易翻车的地方，先算账。
 
-| 东西 | 体积 | 进 git？ |
+| 东西 | 体积 | 去哪 | 理由 |
+|---|---|---|---|
+| `public/data/*.json`（21 个） | **0.7 MB** | **git + R2 `data/`** | git 当构建输入与台账，R2 给浏览器读 |
+| 版本 / 资产状态 | < 100 KB | **git `state/`** | 没有它下一轮就退化成全量 |
+| Lua 中间产物（`.lj` / 反编译 `.lua`） | 数百 MB | **`actions/cache`** | 纯中间态，可随时重建 |
+| 图片资产 | **6.82 GB / 19,443 文件** | **只进 R2** | 见下 |
+
+### 6.0 三个上限，卡的是不同环节
+
+| 上限 | 数值 | 卡住谁 |
 |---|---|---|
-| `public/data/*.json` | 十几 MB | ✅ 必须进（前端要读，且需要历史） |
-| `new.json` | < 1 MB | ✅ 进 |
-| Lua 中间产物（`.lj` / 反编译 `.lua`） | 数百 MB | ❌ 进 `actions/cache` |
-| 图片资产（`painting/` `spine/` 等 16 个目录） | **6.82 GB / 19,443 文件** | ❌ **绝对不能进** |
+| Pages 文件数 | **20,000 / 部署** | 资产绝不能放 Pages —— 现在就 19,443，余量 557 |
+| Pages 构建次数 | 500 / 月 | 数据不能放 Pages 仓库 —— 每次数据更新都会触发前端重建 |
+| R2 免费存储 | **10 GB-month** | 6.82 GB 资产 + 数据，占 68%，安全 |
+| GitHub 私有仓库 Actions | 2,000 分钟 / 月 | 决定 cron 频率；公开仓库无限 |
 
 ### 为什么资产不能进 git
 
@@ -212,27 +259,51 @@ AzurLaneData/
 
 ### 为什么"每小时 commit"也会撑爆
 
-数据 json 每次改 1~3 个文件、约 5 MB 新 blob。若真的每小时 commit 一次，
-一年就是 8760 × 5 MB ≈ 43 GB。
+**实测数据只有 0.7 MB / 21 个文件**，所以"撑爆仓库"这条其实不成立：
+即使每小时都 commit，一年 720 次 × 0.7 MB ≈ 500 MB，git 扛得住。
 
-**所以 cron 只做"检查"，不无条件 commit。** `check_version.py` 先比 `azhash`，
-没变就直接结束（几百毫秒，零成本）。真正 commit 的频率 = 游戏更新频率
-（CN 实测约每周 1~2 次），一年约 100~200 次，累计几 GB 以内。
+但仍然坚持 cron 只做"检查"，理由换成了另外两条：
 
-再加两条保险：
+- **Actions 分钟**：私有仓库 2,000 分钟/月，720 次空跑就是 720 分钟（每次按
+  1 分钟取整），占掉 36%。公开仓库无限，但没必要浪费。
+- **提交噪声**：一年 700 多个「什么都没变」的提交，`git log` 就没法看了。
 
-1. **每年做一次孤支重置**（旧历史还在 `AzurLaneData-legacy` 备份 tag 里）：
-   ```bash
-   git checkout --orphan clean
-   git commit -m "chore: 压缩历史"
-   git branch -M clean master && git push -f
-   ```
-2. **资产走服务器，不走 git**：`azl_assets.py` 生成到 `public/` 后直接
-   `rsync` 到 `cdn.al.pelom.cn` 的根目录，CI 只传增量（脚本已有 state 文件）。
-   仓库里只留 `assets-state.json`。
+`check_version.py` 先比 `azhash`，没变就直接结束（几百毫秒）。真正 commit 的
+频率 = 游戏更新频率（CN 实测约每周 1~2 次），一年 100~200 次。
 
-> 如果暂时没有服务器可写，退路是用 **GitHub Release** 挂资产包（每个版本一个
-> release，`gh release upload`），仍然比进 git 强得多。
+再加一条保险：**每年做一次孤支重置**（旧历史打 tag 留档）：
+
+```bash
+git checkout --orphan clean
+git commit -m "chore: 压缩历史"
+git branch -M clean master && git push -f
+```
+
+资产不进 git（`azl_assets.py` 生成到临时目录后 `rclone` 同步到 bucket），
+仓库里只留 `.azl/assets-state.json`（见 `CDN.md` §5.4）。
+
+### 6.0.1 资产推 R2 的两个细节
+
+**用 rclone，别手写 S3 客户端。** R2 兼容 S3，rclone 自带并发、断点续传、校验：
+
+```bash
+rclone sync out/assets r2:azl-cdn \
+  --transfers 32 --checkers 32 --fast-list \
+  --size-only                       # 关键，见下
+```
+
+`--size-only` 不是偷懒：`azl_assets.py` 已经用 md5 判断过"要不要重新生成"，
+没变就不会重写文件，所以**大小相同 = 内容相同**。而 rclone 默认按 mtime 比对，
+本地文件的 mtime 是生成时间、R2 对象的 mtime 是上传时间，两个永远对不上 ——
+不加 `--size-only` 会导致**每次全量重传 19,443 个文件**。
+
+**操作数完全够。** 首次全量约 19,443 次 PutObject = 19,443 Class A，
+限额 100 万/月；日常增量通常 0~200 个。浏览器读走 Cloudflare 缓存后，
+Class B 基本不怎么消耗。
+
+> 如果 R2 还没配好，退路是用 **GitHub Release** 挂资产包
+> （每个版本一个 release，`gh release upload`），仍然比进 git 强得多。
+> 但那会把每个版本打成几个大包，增量更新体验差，只适合过渡。
 
 ### 6.1 两种"全量"要分开看
 
@@ -266,47 +337,46 @@ AzurLaneData/
 
 ## 7. 分阶段实施
 
-### 阶段 0：打通解包（**先做这个，其余都靠它**）
+> **阶段 0 / 0.5 / 1 / 2 已完成**，数字固化在 `docs/VERIFICATION.md`，
+> 原始证据在 `p0-artifacts` / `stage1-artifacts` / `scripts32-artifacts` 三个分支。
+> 下面保留它们是因为**换版本或换机器时可能需要重跑**，不是待办。
 
-目标：本地能从一个 `sharecfgdata` bundle 拿到 lua 源码。
+### 阶段 0：打通解包 ✅
+
+本地能从一个 `sharecfgdata` bundle 拿到 lua 源码。
 
 ```bash
-# 环境
 pip install -r requirements.txt      # UnityPy + ljd（版本已锁定）
 chmod +x tools/bcdec tools/uabdec    # 静态 32 位 ELF，实测不需要 libc6:i386
 # 纯 Windows 跑不了 ELF：用 WSL，或者直接交给 CI（p0-probe.yml）
 
-# 只解一张最小的表
 python scripts/unpack_lua.py --server CN --out raw --work work --only weapon_name
 ```
 
 验收：
 
-- [ ] `raw/weapon_name.json` 生成，条目数 > 1000
-- [ ] 日志里出现 `weapon_name: 1 表 / N 条`，`failed` 为 0
-- [ ] 与旧链路对比：`fetch_lua_tables.py` 产出的 `weapon_name.json` 条数一致
+- [x] `raw/weapon_name.json` 生成，2422 条
+- [x] `failed` 为 0
+- [x] 与旧链路对比：**逐字节相同**（`cmp` 无差异）
 
 **卡住时的排查顺序**：`bcdec` 返回码 → `bcdec` 输出前 4 字节是否为 `\x1bLJ`
 → `ljd` 是否抛异常 → 分段数是否为 0。
 
-### 阶段 0.5：先迁基线数据（**不能跳过**）
+### 阶段 0.5：迁基线数据 ✅
 
 `build_data_impl.py` 的 `build_ship_attr(raw, prev_dir)` 是**合并式**的：
 能从游戏推的字段覆盖，推不出的（`transform` / `gear_score` 等）保留旧值。
 如果 `public/data` 是空目录，这些字段会静默退化成"不存在"。
 
-所以搬家顺序必须是：
-
 ```bash
-# 从 AzurLaneTools 把现有数据搬过来
 git clone --depth=1 https://github.com/Pelom777/AzurLaneTools.git /tmp/front
 cp -r /tmp/front/public/data/. public/data/
 git add public/data && git commit -m "chore: 迁入基线数据"
 ```
 
-验收：`git ls-files public/data | wc -l` 与前端仓库一致（21 个文件）。
+验收：**21 个文件 / 781 KB**，与前端仓库一致。
 
-### 阶段 1：全量数据
+### 阶段 1：全量数据 ✅
 
 ```bash
 python scripts/unpack_lua.py --server CN --out raw --work work
@@ -316,17 +386,26 @@ python scripts/check_data_contract.py --data public/data
 
 验收：
 
-- [ ] 7 张表齐全（`sharecfgdata` 里 3 张 + `scripts32` 里 4 张）
-- [ ] 4 个 json 全部生成，`check_data_contract` 通过
-- [ ] **新旧链路互比无差异**（见 §4.1 的四条命令）—— 这条最重要
-- [ ] 与仓库现有 `public/data` 做 `check_data_diff.py`，差异只应该是游戏侧真实改动
-      （已知：`siwangzhuzai` 改名、`huangjiacaifu` type 22→23、36 艘潜艇油耗 +1）
+- [x] 36 张表 / 236,150 条 / 1266 s / 失败 0
+- [x] 契约校验全通过（ship 897 / skin 2491 / ship-attr 897，键集对齐）
+- [x] **新旧链路 21 个产物全部一致，0 差异**
+- [x] 与仓库旧数据的差异均为预期（108 艘新船、2 个改名/改类、3 个已删皮肤）
 
-### 阶段 2：CI 跑通
+### 阶段 2：CI ✅
 
-- [ ] `update-data.yml` 手动触发一次（`force=true`），全绿
-- [ ] 再触发一次不带 force，`check_version` 判定未变，秒级结束
-- [ ] `actions/cache` 命中的 run 里，反编译耗时显著下降
+- [x] `update-data.yml` 手动触发（`force=true`），全绿
+- [x] 不带 force 再触发，`check_version` 判定未变，**15 秒**结束，无空提交
+- [x] `actions/cache` 命中后解包 **50.5 s**（对比 1265.9 s，25×）
+
+### 阶段 2.5：data 发布到 R2 ⬅ **待验证，这是当前唯一 P0**
+
+`update-data.yml` 新增了三步（装 rclone / 查凭据 / `rclone copy public/data`），
+**还没跑过**。验收：
+
+- [ ] 跑一次 `force=true, dry_run=false`，R2 的 `data/` 出现 21 个对象
+- [ ] `curl -I https://<cdn>/data/ship.json` 返回 `Cache-Control: public, max-age=300`
+- [ ] 内容与本地 `public/data/ship.json` 逐字节一致
+- [ ] 同一个 json 第二次跑不会重复上传（`--checksum` 生效）
 
 ### 阶段 3：资产与拆分
 

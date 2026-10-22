@@ -36,6 +36,13 @@ permissions:
 env:
   SERVER: ${{ inputs.server || 'CN' }}
   PYTHONUNBUFFERED: "1"
+  # 与 update-assets.yml 同一套 remote 配置，不落任何配置文件
+  RCLONE_CONFIG_R2_TYPE: s3
+  RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+  RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+  RCLONE_CONFIG_R2_REGION: auto
 
 jobs:
   build:
@@ -108,6 +115,51 @@ jobs:
           python scripts/track_new.py \
             --data public/data \
             --version "${{ steps.ver.outputs.version }}"
+
+      # ── 发布到 R2 ──────────────────────────────────────────────
+      # 前端只认 cdn.al.pelom.cn（= R2），不读 git。所以数据必须走这一步，
+      # 否则"生成了但没人能读到"。放在 commit 之前：上传失败就不提交，
+      # version.json 不前进，下一轮会自动重试。
+      #
+      # 缓存头必须是短的：图片内容不变可以 immutable，数据一天变几次，
+      # 长缓存会让前端在上游更新后仍然读旧值。
+      - name: 安装 rclone
+        if: steps.contract.outcome == 'success' && inputs.dry_run != true
+        run: |
+          curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone.zip
+          unzip -oq /tmp/rclone.zip -d /tmp/rclone
+          cp /tmp/rclone/rclone-*/rclone /usr/local/bin/rclone
+          chmod +x /usr/local/bin/rclone
+          rclone version | head -1
+
+      - name: 检查 R2 凭据
+        if: steps.contract.outcome == 'success' && inputs.dry_run != true
+        run: |
+          missing=""
+          [ -z "$RCLONE_CONFIG_R2_ACCESS_KEY_ID" ] && missing="$missing R2_ACCESS_KEY_ID"
+          [ -z "$RCLONE_CONFIG_R2_SECRET_ACCESS_KEY" ] && missing="$missing R2_SECRET_ACCESS_KEY"
+          [ -z "${{ secrets.R2_ACCOUNT_ID }}" ] && missing="$missing R2_ACCOUNT_ID"
+          [ -z "${{ secrets.R2_BUCKET }}" ] && missing="$missing R2_BUCKET"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少 secrets:$missing（配置方法见 docs/CDN.md §5.1）"
+            exit 1
+          fi
+          echo "凭据齐全，桶 = ${{ secrets.R2_BUCKET }}"
+
+      - name: 发布 data 到 R2
+        if: steps.contract.outcome == 'success' && inputs.dry_run != true
+        run: |
+          # --checksum：本地 mtime 每次构建都变，按 size+mtime 会重复上传
+          # --s3-no-check-bucket：R2 对受限 token 的 HeadBucket 返回 403
+          rclone copy public/data "r2:${{ secrets.R2_BUCKET }}/data" \
+            --checksum \
+            --s3-no-check-bucket \
+            --transfers 8 --checkers 8 \
+            --header-upload "Cache-Control: public, max-age=300, stale-while-revalidate=60" \
+            --stats 5s --stats-one-line
+          rclone lsf "r2:${{ secrets.R2_BUCKET }}/data" --files-only | sort > /tmp/r2-data.lst
+          echo "远端 data/ 现有 $(wc -l < /tmp/r2-data.lst) 个对象"
+          cat /tmp/r2-data.lst
 
       - name: 记录版本
         if: steps.ver.outputs.changed == 'true' || inputs.force

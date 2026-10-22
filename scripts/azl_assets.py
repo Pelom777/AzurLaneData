@@ -638,6 +638,10 @@ def main() -> int:
                     help='分片：只处理 crc32(名字) %% N == I 的那一份（I 从 0 起）。'
                          '给磁盘紧张的环境分批全量重建用；按名字取模而不是按顺序切，'
                          '所以分片结果与清单顺序无关，重跑时同一批还是同一批')
+    ap.add_argument('--plan', action='store_true',
+                    help='只盘点不生成：走与正式运行**完全相同**的枚举与过滤，'
+                         '数出 state 里已过期/缺失的资源量，写到 $GITHUB_OUTPUT。'
+                         '用来决定该分几片，而不是让人提前猜')
     args = ap.parse_args()
 
     shard_i, shard_n = 0, 1
@@ -650,10 +654,12 @@ def main() -> int:
         if not 0 <= shard_i < shard_n:
             die(f'--shard 越界: {args.shard}（要求 0 <= I < N）')
 
-    import UnityPy
-    import cv2  # noqa: F401  提前失败，避免下完几十 GB 才发现缺依赖
-
-    UnityPy.config.FALLBACK_UNITY_VERSION = FALLBACK_UNITY_VERSION
+    # 盘点模式不碰解码，也就不需要 UnityPy / cv2 —— 这让 CI 的 prep job
+    # 可以完全不装依赖（省掉约 40 秒的 pip install）。
+    if not args.plan:
+        import UnityPy
+        import cv2  # noqa: F401  提前失败，避免下完几十 GB 才发现缺依赖
+        UnityPy.config.FALLBACK_UNITY_VERSION = FALLBACK_UNITY_VERSION
 
     server = args.server.upper()
     if server not in SERVERS:
@@ -691,7 +697,8 @@ def main() -> int:
     prev = state.setdefault('items', {}).setdefault(server, {})
 
     report = {'new': 0, 'changed': 0, 'skipped': 0, 'seeded': 0, 'failed': 0,
-              'files': 0, 'unused': 0, 'other_shard': 0}
+              'files': 0, 'unused': 0, 'other_shard': 0,
+              'pending': 0, 'pending_bytes': 0}
     written: list[Path] = []
     items = args.items or ['painting', 'squareicon', 'shipicon']
     if shard_n > 1:
@@ -724,7 +731,8 @@ def main() -> int:
 
         done = 0
         for path, info in sorted(targets.items()):
-            if args.limit and done >= args.limit:
+            # 盘点模式不吃 limit：要的是全量口径，不是"这一轮打算做几个"
+            if not args.plan and args.limit and done >= args.limit:
                 break
             # 立绘的贴图包和网格包是依赖，不单独产出
             if item == 'painting' and path.endswith(('_tex', '-mesh')):
@@ -746,6 +754,20 @@ def main() -> int:
                 marker_file = public / 'painting' / name / f'{name}.json'
             else:
                 marker_file = public / item / f'{name}.png'
+
+            # 盘点：判据只看 state 里的 md5 是否与当前清单一致。
+            # 刻意不看 marker_file.exists() —— CI 是干净 checkout，产物本来就不在
+            # 磁盘上，带了这一半判据会把"state 已是最新"的资源全部误算成待处理。
+            # 这样得到的是**下界**：远端对象若丢失也会多出一些真实工作量，
+            # 但那属于自愈范畴，不该影响分片决策。
+            if args.plan:
+                if prev.get(key) != info['md5']:
+                    report['pending'] += 1
+                    report['pending_bytes'] += info['size']
+                else:
+                    report['skipped'] += 1
+                continue
+
             if prev.get(key) == info['md5'] and marker_file.exists() and not args.force:
                 report['skipped'] += 1
                 continue
@@ -810,6 +832,16 @@ def main() -> int:
             done += 1
             if done % 20 == 0:
                 log(f'  已处理 {done} 个')
+
+    # 盘点：只报数，不写 state、不写清单。调用方拿这个数决定分几片。
+    if args.plan:
+        log(f'盘点结果：待处理 {report["pending"]} 个 / '
+            f'{report["pending_bytes"] / 1048576:.1f} MB（主体包，不含依赖），'
+            f'已是最新 {report["skipped"]} 个，未被引用 {report["unused"]} 个')
+        set_output(pending=report['pending'],
+                   pending_bytes=report['pending_bytes'],
+                   up_to_date=report['skipped'])
+        return 0
 
     if not args.dry_run:
         Path(args.state).parent.mkdir(parents=True, exist_ok=True)
