@@ -72,6 +72,10 @@ on:
         description: "只生成，不拉远端、不上传、不提交"
         default: false
         type: boolean
+      refresh_headers:
+        description: "一次性：只把桶里所有 *.json 的 Cache-Control 刷成 300s，不做生成"
+        default: false
+        type: boolean
 
 concurrency:
   group: update-assets
@@ -102,6 +106,7 @@ jobs:
   # 这个 job 不装任何第三方依赖：azl_assets.py 的 cv2 / UnityPy 都是函数内导入，
   # 盘点模式走不到。整个 job 约 20 秒。
   prep:
+    if: ${{ !inputs.refresh_headers }}
     runs-on: ubuntu-latest
     outputs:
       shards: ${{ steps.decide.outputs.shards }}
@@ -157,6 +162,7 @@ jobs:
 
   assets:
     needs: prep
+    if: ${{ !inputs.refresh_headers }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
@@ -276,6 +282,14 @@ jobs:
       # 生成的清单里，会被一并删掉）。--ignore-times：清单已是精确变更集。
       # --s3-no-check-bucket：R2 对受限 token 的 HeadBucket 返回 403，rclone 会
       # 误判桶不存在并尝试 CreateBucket，然后整体失败。
+      #
+      # 两类对象、两种 TTL（2026-10-22）：
+      #   *.json   索引文件，前端靠它决定去取哪些图层。内容一变就必须尽快生效，
+      #            所以跟 data 链路一致用 300s。
+      #   其余      图片 / mesh，路径里没有内容 hash，改了也只能是"短一点的长缓存"，
+      #            取 86400。
+      # 之前 json 也是 86400：删掉 shop_hx 图层之后，已经拿过旧 json 的浏览器
+      # 最长要 24h 才换新版，这期间一直去请求已被删除的 shop_hx.png（404）。
       - name: 上传（分片 ${{ matrix.shard }}）
         if: ${{ !inputs.dry_run }}
         run: |
@@ -285,13 +299,25 @@ jobs:
           n=$(wc -l < ".azl/upload-$SHARD.lst")
           echo "分片 $SHARD 待上传 $n 个对象"
           if [ "$n" -eq 0 ]; then echo "清单为空，跳过上传"; exit 0; fi
-          rclone copy public "r2:${{ secrets.R2_BUCKET }}" \
-            --files-from ".azl/upload-$SHARD.lst" \
-            --ignore-times \
-            --s3-no-check-bucket \
-            --transfers 16 --checkers 32 \
-            --header-upload "Cache-Control: public, max-age=86400" \
-            --stats 15s --stats-one-line
+
+          grep '\.json$' ".azl/upload-$SHARD.lst" > ".azl/upload-$SHARD.json.lst" || true
+          grep -v '\.json$' ".azl/upload-$SHARD.lst" > ".azl/upload-$SHARD.bin.lst" || true
+
+          upload() {
+            local lst="$1" cc="$2" c
+            c=$(wc -l < "$lst")
+            if [ "$c" -eq 0 ]; then echo "  跳过（0 个）：$lst"; return 0; fi
+            echo "  上传 $c 个 → Cache-Control: $cc"
+            rclone copy public "r2:${{ secrets.R2_BUCKET }}" \
+              --files-from "$lst" \
+              --ignore-times \
+              --s3-no-check-bucket \
+              --transfers 16 --checkers 32 \
+              --header-upload "Cache-Control: $cc" \
+              --stats 15s --stats-one-line
+          }
+          upload ".azl/upload-$SHARD.json.lst" "public, max-age=300, stale-while-revalidate=60"
+          upload ".azl/upload-$SHARD.bin.lst"  "public, max-age=86400"
 
       - name: 上报分片账目
         if: always()
@@ -346,7 +372,7 @@ jobs:
   # 靠它判断"这个资源我已经按哪个 md5 生成过了"。
   merge:
     needs: [prep, assets]
-    if: ${{ !inputs.dry_run && !cancelled() }}
+    if: ${{ !inputs.dry_run && !inputs.refresh_headers && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -451,3 +477,48 @@ jobs:
             echo "| 待上传（所有分片合计） | ${{ steps.merge.outputs.written || '-' }} |"
             echo "| dry-run | ${{ inputs.dry_run }} |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # 一次性补救（2026-10-22）：桶里已有的 *.json 是 86400 上传的，改代码只影响
+  # 之后的新对象，历史对象的元数据不会自己变。所以拉下来再传回去，把头改掉。
+  # json 只有几百字节，2.5k 个来回也就几 MB，比重新生成便宜几个数量级。
+  # 不做生成、不动 state —— 纯元数据操作，随时可以再跑一次。
+  headers:
+    if: ${{ inputs.refresh_headers }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: 安装 rclone
+        run: |
+          curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone.zip
+          unzip -oq /tmp/rclone.zip -d /tmp/rclone
+          cp /tmp/rclone/rclone-*/rclone /usr/local/bin/rclone
+          chmod +x /usr/local/bin/rclone
+          rclone version | head -1
+
+      - name: 取回所有 json
+        run: |
+          mkdir -p _hdr
+          rclone copy "r2:${{ secrets.R2_BUCKET }}" _hdr \
+            --include "*.json" \
+            --s3-no-check-bucket \
+            --transfers 32 --checkers 32 \
+            --stats 15s --stats-one-line
+          echo "取回 $(find _hdr -name '*.json' | wc -l) 个 json，共 $(du -sh _hdr | awk '{print $1}')"
+
+      - name: 用 300s 的头传回去
+        run: |
+          n=$(find _hdr -name '*.json' | wc -l)
+          if [ "$n" -eq 0 ]; then echo "::error::没取回任何 json，拒绝继续"; exit 1; fi
+          rclone copy _hdr "r2:${{ secrets.R2_BUCKET }}" \
+            --include "*.json" \
+            --ignore-times \
+            --s3-no-check-bucket \
+            --transfers 32 --checkers 32 \
+            --header-upload "Cache-Control: public, max-age=300, stale-while-revalidate=60" \
+            --stats 15s --stats-one-line
+
+      - name: 抽查
+        run: |
+          for p in painting/baifeng_2/baifeng_2.json; do
+            curl -sI "https://pub-85b4b8af407244bc8f1502127fc530c3.r2.dev/$p" | grep -i "cache-control\|^HTTP"
+          done

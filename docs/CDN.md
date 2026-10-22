@@ -378,10 +378,21 @@ public/squareicon/y.png      →  r2:<bucket>/squareicon/y.png
 | 链路 | 产出方 | 上传步骤 | 缓存头 |
 |---|---|---|---|
 | `data/` | `update-data.yml`（解包 Lua → `build_data.py`） | 「发布 data 到 R2」 | `max-age=300, stale-while-revalidate=60` |
-| 图片 | `update-assets.yml`（`azl_assets.py`） | 各分片的「上传」 | `max-age=86400` |
+| 图片 / mesh | `update-assets.yml`（`azl_assets.py`） | 各分片的「上传」 | `max-age=86400` |
+| 立绘 `*.json` | 同上 | 同一分片里**单独一趟** | `max-age=300, stale-while-revalidate=60` |
 
 **为什么数据必须短缓存**：图片路径里没有内容 hash、但内容几个月才变一次；
 数据每天可能变几次，长缓存会让前端在上游更新后仍读到旧值（见 §6）。
+
+**为什么立绘 json 也归短缓存那一档**（2026-10-22 修）：json 是索引 ——
+前端靠它决定去取哪些图层。曾经它跟着图片一起标 `max-age=86400`，结果是
+删掉 `shop_hx` 图层之后，桶里内容当天就干净了，但已经拿过旧 json 的浏览器
+最长要 24h 才换新版，这期间一直在请求已被删除的 `shop_hx.png`（404）。
+所以分片上传拆成两趟：`*.json` 走 300s，其余走 86400。
+
+已经上传过的旧对象不会因为改代码就换头。要刷存量，dispatch
+`update-assets` 时勾 `refresh_headers=true`：它把桶里所有 `*.json`
+拉下来再传回去，只改元数据，不做生成、不动 state，随时可以重跑。
 
 上传步骤刻意放在 `commit` **之前**：上传失败就不提交，`version.json` 不前进，
 下一轮自动重试。反过来先提交再上传，会出现「git 说已更新、CDN 还是旧值」
