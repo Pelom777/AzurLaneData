@@ -558,11 +558,17 @@ def load_used_names(data_dir: Path) -> set[str]:
     return used
 
 
-def export_texture_bundle(bundle: Path, dest_dir: Path, base_name: str) -> list[Path]:
+def export_texture_bundle(bundle: Path, dest_dir: Path,
+                          base_name: str) -> list[Path] | None:
     """贴图类资源 → `<dir>/<资源名>.png`。
 
     站点是按 `${cdn}/<目录>/${painting}.png` 直接拼路径取图的，
     所以文件名必须是资源名的全小写形式；只有包里含多张贴图时才接贴图名。
+
+    返回 `None` 表示**包里根本没有 Texture2D**（纯 prefab 包，如
+    `iconframe/10003`）—— 调用方应当跳过并记入 state，而不是算失败：
+    否则每轮都会重试它、每轮都报「失败 1」。
+    返回空列表才表示「有贴图但一张也没导出来」，那才是真失败。
     """
     import UnityPy
     from painting_site import save_png
@@ -575,6 +581,8 @@ def export_texture_bundle(bundle: Path, dest_dir: Path, base_name: str) -> list[
             textures.append(obj.read())
         except Exception as exc:
             warn(f'{bundle.name} 贴图读取失败: {exc}')
+    if not textures:
+        return None
     written: list[Path] = []
     for data in textures:
         tex_name = (getattr(data, 'm_Name', '') or '').strip()
@@ -697,7 +705,7 @@ def main() -> int:
     prev = state.setdefault('items', {}).setdefault(server, {})
 
     report = {'new': 0, 'changed': 0, 'skipped': 0, 'seeded': 0, 'failed': 0,
-              'files': 0, 'unused': 0, 'other_shard': 0,
+              'files': 0, 'unused': 0, 'other_shard': 0, 'no_texture': 0,
               'pending': 0, 'pending_bytes': 0}
     written: list[Path] = []
     items = args.items or ['painting', 'squareicon', 'shipicon']
@@ -817,12 +825,22 @@ def main() -> int:
                         log(f'  {name}: 跳过图层 {result["skipped"]}')
                 else:
                     files = export_texture_bundle(cached, public / item, name)
-                ok = bool(files)
             except Exception as exc:
                 warn(f'{path} 处理失败: {type(exc).__name__}: {exc}')
                 report['failed'] += 1
                 continue
-            if not ok:
+            if files is None:
+                # 包里没有 Texture2D（纯 prefab）。不是失败，但必须记进 state，
+                # 否则每轮都会重试、每轮都报一次失败。
+                log(f'  {path}: 无贴图，跳过')
+                report['no_texture'] += 1
+                prev[key] = info['md5']
+                continue
+            if not files:
+                # 一定要留痕：这个分支以前只把计数加一，结果 2026-10-22 那轮
+                # 报「失败 1」却完全查不到是哪个资源、为什么。
+                warn(f'{path} 处理失败: 有贴图但一张也没导出来'
+                     f'（bundle {info["size"]} B）')
                 report['failed'] += 1
                 continue
             written.extend(files)
@@ -864,7 +882,7 @@ def main() -> int:
 
     log(f'完成: 新增 {report["new"]}, 变更 {report["changed"]}, '
         f'跳过 {report["skipped"]}, 失败 {report["failed"]}, '
-        f'未被引用 {report["unused"]}'
+        f'无贴图 {report["no_texture"]}, 未被引用 {report["unused"]}'
         + (f', 他片 {report["other_shard"]}' if shard_n > 1 else ''))
     if report['seeded']:
         log(f'  其中 {report["seeded"]} 个是状态播种（产物已在磁盘，只补 state 记录）')
