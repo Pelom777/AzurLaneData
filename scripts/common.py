@@ -135,6 +135,21 @@ def is_censored(name: str) -> bool:
     return bool(_CENSORED_RE.search(name.lower()))
 
 
+# `_n` 变体（未收录的备用/裸体差分立绘）。游戏里是**独立的包**，例如
+#   painting/2b_n、painting/yan_n、painting/aban_n_hx
+# 站点同样从不收录：原前端仓库 public/painting（2,159 个目录）含 `_n` 的 **0 个**；
+# 当前清单 4,548 个立绘名里有 1,538 个带 `_n`，而 public/data 的引用集里 **0 个**。
+# 和 `_hx` 一样是硬规则，不维护名单。
+# 注意：这条规则只管**立绘目录**，不管包内的图层节点 ——
+# `nengdai_idol.json` 里就有一个 `nengdai_idol_n` 图层，旧仓库也保留着。
+_N_VARIANT_RE = re.compile(r"_n($|_)")
+
+
+def is_n_variant(name: str) -> bool:
+    """名字是否是 `_n` 变体立绘（独立包，站点不收录）。"""
+    return bool(_N_VARIANT_RE.search(name.lower()))
+
+
 # ---------------------------------------------------------------- git 对象
 
 def blob_sha1(data: bytes) -> str:
