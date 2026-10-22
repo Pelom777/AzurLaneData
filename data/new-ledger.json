@@ -1,7 +1,7 @@
 {
- "version": "9.7.398",
- "updated": "2026-10-21T16:45:46Z",
- "baseline": true,
+ "version": "9.7.410",
+ "updated": "2026-10-22T05:33:43Z",
+ "baseline": false,
  "ships": {
   "22": {
    "name": "22",
@@ -830,6 +830,12 @@
    "type": 5,
    "rarity": 5,
    "first_seen": null
+  },
+  "changshehao": {
+   "name": "长蛇号",
+   "type": 23,
+   "rarity": 4,
+   "first_seen": "2026-10-22T05:33:43Z"
   },
   "changyue": {
    "name": "长月",
@@ -2631,6 +2637,12 @@
    "rarity": 5,
    "first_seen": null
   },
+  "leiyierbei": {
+   "name": "雷伊尔·贝号",
+   "type": 24,
+   "rarity": 4,
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
   "lemaer": {
    "name": "勒马尔",
    "type": 1,
@@ -3639,6 +3651,12 @@
    "rarity": 4,
    "first_seen": null
   },
+  "sailimiye": {
+   "name": "塞利米耶号",
+   "type": 24,
+   "rarity": 5,
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
   "saiwasituoboer": {
    "name": "塞瓦斯托波尔",
    "type": 5,
@@ -3890,6 +3908,12 @@
    "type": 1,
    "rarity": 2,
    "first_seen": null
+  },
+  "shuixinghao": {
+   "name": "水星号",
+   "type": 23,
+   "rarity": 5,
+   "first_seen": "2026-10-22T05:33:43Z"
   },
   "shuixingjinian": {
    "name": "水星纪念",
@@ -4148,6 +4172,12 @@
    "type": 8,
    "rarity": 4,
    "first_seen": null
+  },
+  "tiejiaohao": {
+   "name": "铁角号",
+   "type": 22,
+   "rarity": 5,
+   "first_seen": "2026-10-22T05:33:43Z"
   },
   "tierbici": {
    "name": "提尔比茨",
@@ -6117,6 +6147,11 @@
    "ship": "anninvwang",
    "first_seen": null
   },
+  "anninvwang_3": {
+   "name": "堕翼之诱",
+   "ship": "anninvwang",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
   "anshan": {
    "name": "鞍山",
    "ship": "anshan",
@@ -7467,6 +7502,16 @@
    "ship": "changmen",
    "first_seen": null
   },
+  "changshehao": {
+   "name": "长蛇号",
+   "ship": "changshehao",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "changshehao_2": {
+   "name": "纯白的捕食者",
+   "ship": "changshehao",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
   "changyue": {
    "name": "长月",
    "ship": "changyue",
@@ -7916,6 +7961,11 @@
    "name": "祈愿的巫女兔",
    "ship": "dashan",
    "first_seen": null
+  },
+  "dashan_3": {
+   "name": "恶魔少女天使心",
+   "ship": "dashan",
+   "first_seen": "2026-10-22T05:33:43Z"
   },
   "deleike": {
    "name": "德雷克",
@@ -11417,6 +11467,16 @@
    "ship": "leiniya",
    "first_seen": null
   },
+  "leiyierbei": {
+   "name": "雷伊尔·贝号",
+   "ship": "leiyierbei",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "leiyierbei_2": {
+   "name": "偶像天使☆闪耀练习中！",
+   "ship": "leiyierbei",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
   "lemaer": {
    "name": "勒马尔",
    "ship": "lemaer",
@@ -13527,6 +13587,11 @@
    "ship": "qisheng",
    "first_seen": null
   },
+  "qisheng_3": {
+   "name": "秽翼天使",
+   "ship": "qisheng",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
   "qiubite": {
    "name": "丘比特",
    "ship": "qiubite",
@@ -13791,6 +13856,16 @@
    "name": "星月夜的妖精",
    "ship": "saili",
    "first_seen": null
+  },
+  "sailimiye": {
+   "name": "塞利米耶号",
+   "ship": "sailimiye",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "sailimiye_2": {
+   "name": "自投罗网的预言家？",
+   "ship": "sailimiye",
+   "first_seen": "2026-10-22T05:33:43Z"
   },
   "saiwasituoboer": {
    "name": "塞瓦斯托波尔",
@@ -14372,6 +14447,16 @@
    "ship": "shuiwuyue",
    "first_seen": null
   },
+  "shuixinghao": {
+   "name": "水星号",
+   "ship": "shuixinghao",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "shuixinghao_2": {
+   "name": "天使降临之日",
+   "ship": "shuixinghao",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
   "shuixingjinian": {
    "name": "水星纪念",
    "ship": "shuixingjinian",
@@ -14911,6 +14996,16 @@
    "name": "鲦鱼",
    "ship": "tiaoyu",
    "first_seen": null
+  },
+  "tiejiaohao": {
+   "name": "铁角号",
+   "ship": "tiejiaohao",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "tiejiaohao_2": {
+   "name": "迷惘的堕天使",
+   "ship": "tiejiaohao",
+   "first_seen": "2026-10-22T05:33:43Z"
   },
   "tierbici": {
    "name": "提尔比茨",
@@ -17096,6 +17191,11 @@
    "name": "渊智的指路人",
    "ship": "yuekegongjue",
    "first_seen": null
+  },
+  "yuekegongjue_5": {
+   "name": "魅惑的夜之猎手",
+   "ship": "yuekegongjue",
+   "first_seen": "2026-10-22T05:33:43Z"
   },
   "yuhei": {
    "name": "羽黑",

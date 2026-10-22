@@ -1,6 +1,83 @@
 {
- "version": "9.7.398",
- "updated": "2026-10-21T16:45:46Z",
- "ships": {},
- "skins": {}
+ "version": "9.7.410",
+ "updated": "2026-10-22T05:33:43Z",
+ "ships": {
+  "shuixinghao": {
+   "name": "水星号",
+   "type": 23,
+   "rarity": 5,
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "tiejiaohao": {
+   "name": "铁角号",
+   "type": 22,
+   "rarity": 5,
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "sailimiye": {
+   "name": "塞利米耶号",
+   "type": 24,
+   "rarity": 5,
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "changshehao": {
+   "name": "长蛇号",
+   "type": 23,
+   "rarity": 4,
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "leiyierbei": {
+   "name": "雷伊尔·贝号",
+   "type": 24,
+   "rarity": 4,
+   "first_seen": "2026-10-22T05:33:43Z"
+  }
+ },
+ "skins": {
+  "yuekegongjue_5": {
+   "name": "魅惑的夜之猎手",
+   "ship": "yuekegongjue",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "dashan_3": {
+   "name": "恶魔少女天使心",
+   "ship": "dashan",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "qisheng_3": {
+   "name": "秽翼天使",
+   "ship": "qisheng",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "anninvwang_3": {
+   "name": "堕翼之诱",
+   "ship": "anninvwang",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "shuixinghao_2": {
+   "name": "天使降临之日",
+   "ship": "shuixinghao",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "tiejiaohao_2": {
+   "name": "迷惘的堕天使",
+   "ship": "tiejiaohao",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "sailimiye_2": {
+   "name": "自投罗网的预言家？",
+   "ship": "sailimiye",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "changshehao_2": {
+   "name": "纯白的捕食者",
+   "ship": "changshehao",
+   "first_seen": "2026-10-22T05:33:43Z"
+  },
+  "leiyierbei_2": {
+   "name": "偶像天使☆闪耀练习中！",
+   "ship": "leiyierbei",
+   "first_seen": "2026-10-22T05:33:43Z"
+  }
+ }
 }
