@@ -452,6 +452,47 @@ rclone copy public r2:azurlane-assets \
 版本没变时不会有人 dispatch，所以 R2 操作数是 0。想接成自动的话，在
 `update-data.yml` 末尾加一个 `workflow_dispatch` 调用即可，但建议先手动跑几轮确认增量正确。
 
+### 5.6 `commit.py` 的「推送成功」不可信（已加固）
+
+**现场**：run `39641164165` 的 merge job 日志打印了
+
+```
+推送失败（1/3）：! [rejected]  HEAD -> main (fetch first)
+[azl] 已推送到 main
+```
+
+但远端 `main` 上**没有**那次提交。三种方式交叉核验过：
+
+- `git ls-remote --heads origin main` → `25fb6c4`（我手工提交的那条）
+- `contents?path=.azl/assets-state.json` → 只有 8 条（全部 squareicon）
+- `commits?path=.azl/assets-state.json` → 只有 2 条历史
+
+**根因**：`scripts/common.py` 的 `commit_and_push` 把 `git push` 的返回码 0
+直接当成成功。而 git 在**远端已经包含 HEAD** 时会打印
+`Everything up-to-date` 并返回 0。它区分不了这两种情况：
+
+| 实际情况 | push 返回码 |
+|---|---|
+| 我推上去了 | 0 |
+| 我的提交在 `pull --rebase` 里被丢掉了，没什么可推 | **也是 0** |
+
+painting 全量要跑约 30 分钟，期间 `main` 被别的工作推进过，
+push 被拒 → 自动 `pull --rebase` 重试 → 提交丢了 → 日志照样报成功。
+
+**加固**：推完回读远端 ref，比对是否等于本地 HEAD，不等就 `die()`，
+让这一轮变红而不是假装成功。
+
+```python
+if proc.returncode == 0 and pushed(branch, cwd):
+    log(f"已推送到 {branch}（已回读远端校验）")
+    return True
+if proc.returncode == 0:
+    warn("推送返回 0，但远端不含本次提交")   # 提交被 rebase 丢掉
+```
+
+**遗留**：这次是 state 丢了、图还在（图是分片各自直传的，不依赖 commit）。
+反过来不成立 —— 若哪天产物依赖 state，同样的静默失败会留下缺口。
+
 ## 6. 缓存策略：一个必须知道的坑
 
 站点拼 URL 的方式是 `${cdn}/painting/${name}/${name}.png` —— **路径里没有内容 hash**。
@@ -481,6 +522,7 @@ r2.dev 因为没有 Cache 规则，实际上只看对象上的 `Cache-Control` �
 | `HANDOFF.md` 写着"已支持 spine" | ⚠️ 表述有误，实际不支持 |
 | 单 job 跑不下 painting 全量 | ✅ 新增 `regen-assets.yml`，crc32 分片并行，见 §4.5 |
 | 每个分片从空 state 起手 ⇒ 每轮全量 | ✅ 改为继承基线 state + 差分合并，见 §4.5 |
+| `commit.py` 的「推送成功」不可信 | ⚠️ 已加推后回读校验，见 §5.6 |
 
 ## 8. 验收标准
 

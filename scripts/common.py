@@ -71,6 +71,30 @@ def git(*args: str, cwd: str | Path | None = None, check: bool = True) -> str:
     return sh(["git", *args], cwd=cwd, check=check)
 
 
+def pushed(branch: str, cwd: str | Path) -> bool:
+    """HEAD 是否已经被远端 ref 包含。
+
+    不能用 `git push` 的返回码判断成功：当远端**已经**包含 HEAD 时，git 会打印
+    "Everything up-to-date" 并同样返回 0。也就是说它无法区分
+    「我推上去了」和「我的提交被 rebase 弄丢了」——后者在 regen-assets 的
+    merge job 里真实发生过一次（run 39641164165 打印了「已推送到 main」，
+    但 main 上根本没有那个提交，最后只能从 artifact 恢复 state）。
+    """
+    cwd = Path(cwd)
+    proc = subprocess.run(
+        ["git", "ls-remote", "origin", f"refs/heads/{branch}"],
+        cwd=str(cwd), capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    if proc.returncode != 0:
+        return False
+    parts = (proc.stdout or "").split()
+    if not parts:
+        return False
+    head = git("rev-parse", "HEAD", cwd=cwd).strip()
+    return parts[0] == head
+
+
 # ---------------------------------------------------------------- git 对象
 
 def blob_sha1(data: bytes) -> str:
@@ -165,12 +189,16 @@ def commit_and_push(
                 encoding="utf-8",
                 errors="replace",
             )
-            if proc.returncode == 0:
-                log(f"已推送到 {branch}")
+            if proc.returncode == 0 and pushed(branch, cwd):
+                log(f"已推送到 {branch}（已回读远端校验）")
                 return True
-            warn(f"推送失败（{attempt}/3）：{(proc.stderr or '').strip()[:400]}")
+            if proc.returncode == 0:
+                # 返回 0 但远端不含本次提交 = 提交在 rebase 里被丢掉了
+                warn(f"推送返回 0，但远端 {branch} 不含本次提交（{attempt}/3），重试")
+            else:
+                warn(f"推送失败（{attempt}/3）：{(proc.stderr or '').strip()[:400]}")
             if attempt == 3:
-                die("推送连续失败，请检查仓库权限或是否有并发写入")
+                die(f"推送后校验未通过：远端 {branch} 不含本次提交，请人工检查")
             git("pull", "--rebase", "--autostash", "-q", "origin", branch,
                 cwd=cwd, check=False)
     return True
