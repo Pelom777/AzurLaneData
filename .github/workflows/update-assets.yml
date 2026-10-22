@@ -1,50 +1,53 @@
-name: regen-assets
+name: update-assets
 
-# 重建资源：按 crc32(名字) 切成 N 片并行跑，每片跑完即上传、即丢弃。
+# 资源链路的**唯一**入口。热更新和全量重建走同一份代码，
+# 只差一个 `shards` 参数：热更新 shards=1，全量重建 shards=6。
 #
-# 和 sync-assets.yml 的分工：
-#   sync-assets = 日常增量，单 job，够用就用它
-#   regen-assets = 重建。差别只在「能一次吃下多大的量」——painting 全量约
-#                  2491 张 / 下载 3.7 GB / 产物 5.6 GB，单 job 撑不住。
+# 为什么合并（2026-10-22）
+# ----------------------
+# 合并前有两个 workflow：sync-assets（热更新）和 regen-assets（全量）。
+# 两者有 6 个步骤逐字重复，但更糟的是**语义相反**：
+#   sync-assets  传了 `--seed`
+#   regen-assets 刻意不传
+# `--seed` 的语义是「远端有对象、state 没记录 → 只补记录、不下载」，
+# 等于断言「托管上那份就是最新版」。全量重建之所以不用它，是因为这个断言
+# 无法验证 —— 官方若换过图，seed 之后会永久停在旧版且不报错。
+# 同一个 state 文件在两个入口得到相反结论，是一颗迟早会踩的雷。
+# 现在统一为：**默认不用 seed**，需要时用 `seed=true` 显式打开，
+# 并且只该用在一件事上：把已由别的途径入库的存量资产接进台账。
 #
-# 什么时候用：
-#   - 首次入库（state 里没有这批资源，等于全量重生）
-#   - 换了桶 / 目标产物丢了，需要从当前 CDN 重拉一遍
-#   - 改了渲染实现（升 UnityPy、改合成算法），要按当前版本整体重出一版
+# 分片（为什么它是唯一真正的差异）
+# ------------------------------
+# 热更新一次只动几十个资源，单 job 几分钟跑完，不需要分片。
+# 全量重建约 2,491 张 / 下载 3.7 GB / 产物 5.6 GB，托管 runner 的 / 只有
+# 约 14 GB，单 job 峰值 9.3 GB 且中途无法回收 —— 必须按 crc32(名字) % N
+# 切成 N 片，每片跑完立刻上传丢弃。分片键用 crc32 而不是 hash()：
+# 后者按进程随机化，换一次进程分片就飘了。
 #
-# 「以后更新时也能用」是靠 state 继承做到的，不是靠每次重跑：
-#   每个分片先 `cp .azl/assets-state.json .azl/state-N.json` 继承基线，
-#   再配合 mark_remote 把「远端已有对象」翻译成本地 marker。
-#   于是判据仍然是原本那一条（state 的 md5 一致 **且** 产物在磁盘），语义不变：
-#     · 首次      state 里没有 → 全部重新生成
-#     · 之后      只有官方改过的（md5 变了）才重做，其余跳过
-#   刻意**不用 --seed**：seed 会在「远端有、state 没记」时跳过，
-#   等于把「托管上的那份就是最新版」这个不可验证的假设写进 state，
-#   之后官方改了内容也不会被发现。宁可多花几分钟重解，也不要静默停在旧版。
+# 这个合并的代价：热更新会多两个 job（prep 5s + merge 40s），
+# 单次运行比原来慢约 45 秒。换来的是只有一个入口、一套语义。
 #
-# 为什么必须分片（本文件存在的理由）：
-#   托管 runner 的 / 只有约 14 GB（实测量过），一次跑完峰值约 9.3 GB 且中途
-#   无法回收。切成 6 片后每片约 下载 0.6 GB + 产物 0.9 GB ≈ 1.6 GB，安全。
-#   分片键用 crc32 而不是 hash()：后者按进程随机化，换一次进程分片就飘了。
-#
-# 时间预算（实测单张约 2.2s 渲染）：
-#   6 片并行 ≈ 20 分钟（含装依赖）；串行则约 2 小时。
-#   注意这里用的是 free 账号额度：一次全量 ≈ 6 × 20 = 120 分钟，别频繁跑。
+# 「以后更新时也能用」靠的是 state 继承，不是每次重跑
+# --------------------------------------------------
+# 每个分片先 `cp .azl/assets-state.json .azl/state-N.json` 继承基线，
+# 再配合 mark_remote 把「远端已有对象」翻译成本地 marker。判据仍是原本那一条
+# （state 的 md5 一致 **且** 产物在磁盘），语义不变：
+#   · 首次      state 里没有 → 全部重新生成
+#   · 之后      只有官方改过的（md5 变了）才重做
 #
 # 前置：public/data 必须是**当前版本**的数据。它决定 --scope used 的引用集，
-#   数据旧了会漏掉新船（实测旧 16 个月的数据会漏 333 张立绘）。
-#   不放心就先 dispatch 一次 update-data（force=true）。
+#   数据旧了会漏掉新船（实测旧 16 个月的数据漏 333 张立绘）。
 
 on:
   workflow_dispatch:
     inputs:
       items:
         description: "资源类别（空格分隔）"
-        default: "painting"
+        default: "painting paintingface squareicon shipicon equipicon iconframe"
         type: string
       shards:
-        description: "分片数（1-16；6 时每片约 1.6 GB，越大越省磁盘）"
-        default: "6"
+        description: "分片数：热更新用 1；全量重建用 6（每片约 1.6 GB）"
+        default: "1"
         type: string
       scope:
         description: "used=只导 public/data 引用到的；all=清单全导"
@@ -55,6 +58,10 @@ on:
         description: "每类每片最多处理几个（0 = 不限。调管路时用它把成本压到最小）"
         default: "0"
         type: string
+      seed:
+        description: "远端有、state 无记录时只补台账不重下。仅用于一次性迁移存量"
+        default: false
+        type: boolean
       force:
         description: "忽略 state 里已存在的 md5，连未变化的也重做"
         default: false
@@ -65,7 +72,7 @@ on:
         type: boolean
 
 concurrency:
-  group: regen-assets
+  group: update-assets
   cancel-in-progress: false
 
 permissions:
@@ -99,12 +106,16 @@ jobs:
           if [ "$N" -lt 1 ] || [ "$N" -gt 16 ]; then
             echo "::error::shards 取 1..16，收到 $N"; exit 1
           fi
+          if [ "$N" = "1" ] && [ "${{ inputs.force }}" = "true" ]; then
+            echo "::warning::shards=1 且 force=true：这会把全量压到一个 job 上，可能要跑两小时。"
+            echo "::warning::全量重建请改用 shards=6。"
+          fi
           echo "shards=$(python3 -c 'import json,sys;print(json.dumps(list(range(int(sys.argv[1])))))' "$N")" >> "$GITHUB_OUTPUT"
 
-  regen:
+  assets:
     needs: prep
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     strategy:
       # 一片失败不要把其他片也掐掉：成功的片段仍有价值（state 会记录），
       # 下次 dispatch 就少做一片。
@@ -132,6 +143,7 @@ jobs:
           unzip -oq /tmp/rclone.zip -d /tmp/rclone
           cp /tmp/rclone/rclone-*/rclone /usr/local/bin/rclone
           chmod +x /usr/local/bin/rclone
+          rclone version | head -1
 
       - name: 检查 R2 凭据
         if: ${{ !inputs.dry_run }}
@@ -147,7 +159,7 @@ jobs:
           fi
           echo "凭据齐全，桶 = ${{ secrets.R2_BUCKET }}"
 
-      # 各片自行拉清单。桶 listing 一次约几秒，比起把它做成 artifact 在六个 job
+      # 各片自行拉清单。桶 listing 一次约几秒，比起把它做成 artifact 在多个 job
       # 之间搬来搬去更简单，也避免了 download-artifact 对单文件路径的处理差异。
       # 并行片之间不会互相干扰：crc32 分片保证每片只碰自己那批名字。
       - name: 拉取远端对象清单
@@ -169,7 +181,7 @@ jobs:
         if: ${{ !inputs.dry_run }}
         run: python scripts/mark_remote.py --listing .azl/remote.lst --public public
 
-      # 继承基线 state：这是"以后还能用"的关键。
+      # 继承基线 state：这是「以后还能用」的关键。
       # 若各片从空 state 起手，每次 dispatch 都会全量重解一遍。
       - name: 准备分片 state
         run: |
@@ -209,6 +221,9 @@ jobs:
           if [ "${{ inputs.limit }}" != "0" ]; then ARGS="$ARGS --limit ${{ inputs.limit }}"; fi
           if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          # seed 默认关。打开它等于断言「远端那份就是最新版」，无法验证，
+          # 只应在一次性迁移存量资产时临时打开（见文件头部说明）。
+          if [ "${{ inputs.seed }}" = "true" ]; then ARGS="$ARGS --seed"; fi
           echo "python scripts/azl_assets.py $ARGS"
           start=$(date +%s)
           python scripts/azl_assets.py $ARGS
@@ -255,31 +270,39 @@ jobs:
             echo "| 残留可用磁盘 | ${disk} MB |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # 每片单独落一个 state 文件 —— 六个 job 各写各的，最后在 merge 里合成。
+      # 每片单独落一个 state + 一份账目 —— N 个 job 各写各的，最后在 merge 里合成。
       # 不能共用同一个文件：并行 job 无法互相看见改动，后写完的会盖掉先写完的。
       #
       # 传目录而不是单文件：upload-artifact 对单文件路径的处理会保留目录前缀，
       # 取回来就变成 .azl/states/.azl/state-N.json，合并时 glob 找不到会直接失败。
       # 目录作为根时内容会被摊平，落点才是确定的。
-      - name: 上传 state 片段
+      - name: 打包分片产物
         if: ${{ !inputs.dry_run }}
         run: |
-          mkdir -p ".azl/frag"
+          mkdir -p .azl/frag
           cp ".azl/state-${{ matrix.shard }}.json" ".azl/frag/state-${{ matrix.shard }}.json"
-          ls -l ".azl/frag"
+          cat > ".azl/frag/report-${{ matrix.shard }}.json" <<EOF
+          {"shard": ${{ matrix.shard }},
+           "new": ${{ steps.gen.outputs.new || 0 }},
+           "changed": ${{ steps.gen.outputs.changed_count || 0 }},
+           "failed": ${{ steps.gen.outputs.failed || 0 }},
+           "files": ${{ steps.gen.outputs.files || 0 }},
+           "written": ${{ steps.gen.outputs.written || 0 }}}
+          EOF
+          ls -l .azl/frag
 
       - uses: actions/upload-artifact@v4
         if: ${{ !inputs.dry_run }}
         with:
-          name: state-${{ matrix.shard }}
+          name: shard-${{ matrix.shard }}
           path: .azl/frag
           retention-days: 3
           if-no-files-found: error
 
   # 把各片 state 合成一份并提交。state 进 git 是增量链路的前提：下一轮
-  # regen / sync 都靠它判断"这个资源我已经按哪个 md5 生成过了"。
+  # 靠它判断"这个资源我已经按哪个 md5 生成过了"。
   merge:
-    needs: [prep, regen]
+    needs: [prep, assets]
     if: ${{ !inputs.dry_run && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -289,10 +312,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: 取回各片 state
+      - name: 取回各片产物
         uses: actions/download-artifact@v4
         with:
-          pattern: state-*
+          pattern: shard-*
           merge-multiple: true
           path: .azl/states
 
@@ -300,9 +323,10 @@ jobs:
       # 本片真正处理过的 key，也有照抄来的基线值。直接按顺序 union 的话，
       # 排在后面的片段会用旧的基线值覆盖前面片段刚算出的新值。
       #
-      # 所以按 key 做差分：只有"与基线不同"的那个值才是本片的新成果。
+      # 所以按 key 做差分：只有「与基线不同」的那个值才是本片的新成果。
       # 若同一个 key 冒出两个不同的新值，说明分片键漂了，保守保留基线并报警。
-      - name: 合并 state
+      - name: 合并 state 与账目
+        id: merge
         run: |
           python - <<'PY'
           import glob, json
@@ -310,11 +334,11 @@ jobs:
           BASE = '.azl/assets-state.json'
           base = json.load(open(BASE, encoding='utf-8'))
           base.setdefault('items', {})
-          frags = sorted(glob.glob('.azl/states/*.json'))
+          frags = sorted(glob.glob('.azl/states/state-*.json'))
           if not frags:
               raise SystemExit('::error::没有任何 state 片段，拒绝合并（生成环节大概全挂了）')
 
-          diff: dict[tuple[str, str], dict[str, list[str]]] = {}
+          diff = {}
           for p in frags:
               frag = json.load(open(p, encoding='utf-8'))
               for srv, items in (frag.get('items') or {}).items():
@@ -344,7 +368,20 @@ jobs:
           print(f'片段 {len(frags)} 个 → 应用 {applied} 条，冲突 {conflicted} 条')
           print(f'state 现有 {total} 条：' +
                 ', '.join(f'{k}={len(v)}' for k, v in base['items'].items()))
+
+          # 账目也在这里汇总，供提交信息与摘要使用
+          tot = {'new': 0, 'changed': 0, 'failed': 0, 'files': 0, 'written': 0}
+          for p in sorted(glob.glob('.azl/states/report-*.json')):
+              r = json.load(open(p, encoding='utf-8'))
+              for k in tot:
+                  tot[k] += int(r.get(k) or 0)
+          print('合计：新增 %d / 变更 %d / 失败 %d / 写出文件 %d'
+                % (tot['new'], tot['changed'], tot['failed'], tot['files']))
+          with open('.azl/total.env', 'w', encoding='utf-8') as fh:
+              for k, v in tot.items():
+                  fh.write(f'{k}={v}\n')
           PY
+          cat .azl/total.env >> "$GITHUB_OUTPUT"
 
       - name: 提交 state
         run: |
@@ -353,4 +390,21 @@ jobs:
             exit 0
           fi
           python scripts/commit.py --paths .azl/assets-state.json \
-            --message "assets: 重建 ${{ inputs.items }}（${{ inputs.shards }} 片）"
+            --message "assets: 新增 ${{ steps.merge.outputs.new }} / 变更 ${{ steps.merge.outputs.changed }}（${{ inputs.shards }} 片）"
+
+      - name: 摘要
+        if: always()
+        run: |
+          {
+            echo "## update-assets"
+            echo
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 类别 | \`${{ inputs.items }}\` |"
+            echo "| 分片 | ${{ inputs.shards }} |"
+            echo "| scope / limit / seed / force | ${{ inputs.scope }} / ${{ inputs.limit }} / ${{ inputs.seed }} / ${{ inputs.force }} |"
+            echo "| 新增 / 变更 / 失败 | ${{ steps.merge.outputs.new || '-' }} / ${{ steps.merge.outputs.changed || '-' }} / ${{ steps.merge.outputs.failed || '-' }} |"
+            echo "| 写出文件 | ${{ steps.merge.outputs.files || '-' }} |"
+            echo "| 待上传（所有分片合计） | ${{ steps.merge.outputs.written || '-' }} |"
+            echo "| dry-run | ${{ inputs.dry_run }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

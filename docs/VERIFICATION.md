@@ -180,7 +180,7 @@ marker。用 9 行假清单单测过：
 CORS 默认关闭，`OPTIONS` 预检 `403`，且 S3 API 的 `Get/PutBucketCors` 也是
 `AccessDenied`（只能在控制台配）——见 `docs/CDN.md` §3.1。
 
-### regen-assets 管路连通性（run `39640672963`）
+### 资源同步管路连通性（原 `regen-assets`，现 `update-assets`，run `39640672963`）
 
 用 `items=squareicon shards=2 limit=3` 把成本压到最小，验证整条链路：
 

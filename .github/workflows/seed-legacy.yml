@@ -8,9 +8,12 @@ name: seed-legacy
 # 按目录分批，每批单独 clone、传完即删 —— 6.8 GB 全量 checkout 会撑爆 runner 磁盘
 # （工作区 + .git 双份）。painting 5.5 GB 必须单独跑。
 #
-# 只搬文件，不碰 state。建 state 走已有的 sync-assets（它有 mark_remote + --seed）：
-#   先跑本 workflow 把所有对象推上去，再跑一次 sync-assets，
-#   它会 lsf 到全量远端清单 → touch marker → --seed 补记录 → 顺带补齐 2025-06 之后的缺口。
+# 只搬文件，不碰 state。建 state 走 `update-assets.yml`，把 seed 打开：
+#   先跑本 workflow 把所有对象推上去，再 dispatch update-assets（seed=true），
+#   它会 lsf 到全量远端清单 → touch marker → 只补台账不重下。
+#
+# 注意：seed=true 等于断言「远端那份就是最新版」。只适合把**已知来源**的
+# 存量资产接进台账；日常更新要保持它关闭（默认就是关的）。
 #
 # 跑完即可删除本文件。
 

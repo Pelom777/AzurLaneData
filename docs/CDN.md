@@ -1,8 +1,8 @@
 # CDN 与资产分发
 
-> 状态：**方案已落地为 `.github/workflows/sync-assets.yml`，尚未跑过真实 R2**
-> （缺 4 个 secrets，见 §5.1）。首次播种仍需本地做，见 §4。
-> 最后核对：2026-10-21，依据 `scripts/azl_assets.py` 源码 + 旧仓库实测数据。
+> 状态：**已落地并端到端跑通**。唯一入口 `.github/workflows/update-assets.yml`
+> （热更新与全量重建同一份代码，只差 `shards` 参数），见 §4.5。
+> 最后核对：2026-10-22。
 
 ## 0. 一页纸结论
 
@@ -238,12 +238,31 @@ rclone copy public r2:azurlane-assets \
 | 50 Mbps | 约 19 分钟 |
 | 100 Mbps | 约 9 分钟 |
 
-## 4.5 可生成类别：走 CI 全量重生（`.github/workflows/regen-assets.yml`）
+## 4.5 资源同步：唯一入口 `.github/workflows/update-assets.yml`
 
-这是现在的**主路径**。和上面几节的区别：**一切从当前 CDN 现取**，
+这是现在的**主路径**。热更新和全量重建走同一份代码 —— **差别只有 `shards`**。
+和 §4 旧做法（本地搬 + `--seed`）的区别：**一切从当前 CDN 现取**，
 不依赖任何历史快照，产出的每张图都是官方当前版本。
 
-### 为什么必须有这个 workflow，而不能直接扩 sync-assets
+### 为什么合并成一个 workflow
+
+2026-10-22 之前有两个：`sync-assets`（热更新）和 `regen-assets`（全量）。
+6 个步骤逐字重复，但更要命的是**语义相反**：
+
+| | 是否 `--seed` | 后果 |
+|---|---|---|
+| sync-assets | 传了 | 远端有、state 没记 → 跳过，等于断言「远端那份就是最新版」 |
+| regen-assets | 刻意不传 | 同上情况 → 重新生成 |
+
+同一个 state 文件在两个入口得出相反结论，是一颗迟早会踩的雷 ——
+而 `--seed` 那条断言**无法验证**：官方换过图也不会被发现，只会永久停在旧版。
+
+现在统一为：**默认不用 seed**，需要时 `seed=true` 显式打开，
+只该用于「把已由别的途径入库的存量资产接进台账」这一件事。
+
+代价：热更新会多两个 job（prep 约 5 s + merge 约 40 s），单次比原来慢约 45 秒。
+
+### 为什么全量必须分片
 
 painting 全量约 **2,491 张 / 下载 3.7 GB / 产物 5.6 GB**。托管 runner 的 `/`
 只有约 14 GB，单 job 峰值约 9.3 GB 且中途无法回收。所以按
@@ -252,22 +271,27 @@ painting 全量约 **2,491 张 / 下载 3.7 GB / 产物 5.6 GB**。托管 runner
 
 ### 用法
 
-```bash
-# GitHub → Actions → regen-assets → Run workflow
-items  = painting          # 空格分隔；painting 会顺带产出 paintingface
-shards = 6                 # 1..16，越大越省磁盘
-scope  = used              # 按 public/data 的引用集过滤
-limit  = 0                 # 调试时给个小值（如 3）把成本压到最小
-force  = false             # true = 忽略已存在的 md5，连未变的也重做
-dry_run= false             # true = 只生成，不拉远端、不上传、不提交
+```text
+热更新（默认）：   items=6 类全导   shards=1   limit=0   seed=false  force=false
+全量重建：         items=painting  shards=6   force 视情况
+调管路：           items=<某一类>  shards=1   limit=3
 ```
 
-或用命令行触发：
-
 ```bash
-gh workflow run regen-assets.yml \
-  -f items=painting -f shards=6 -f scope=used -f limit=0
+# GitHub → Actions → update-assets → Run workflow
+gh workflow run update-assets.yml -f items=painting -f shards=6
+gh workflow run update-assets.yml          # 默认即热更新
 ```
+
+| 输入 | 默认 | 说明 |
+|---|---|---|
+| `items` | 6 类全导 | 空格分隔；`painting` 会顺带产出 `paintingface` |
+| `shards` | `1` | 热更新 1；全量 6（1..16，越大越省磁盘） |
+| `scope` | `used` | 按 `public/data` 的引用集过滤 |
+| `limit` | `0` | 每类每片最多几个，调试用 |
+| `seed` | `false` | **只在一次性迁移存量时打开** |
+| `force` | `false` | 忽略已存在的 md5，连未变的也重做 |
+| `dry_run` | `false` | 只生成，不拉远端、不上传、不提交 |
 
 ### 前置条件
 
@@ -307,13 +331,13 @@ gh workflow run regen-assets.yml \
 | Actions 分钟 | 6 × 约 22 ≈ 130 分钟 / 次全量（free 额度 2000 分钟/月） |
 
 > 全量重生的代价是一次约 130 分钟的 Actions 配额，别频繁跑；
-> 日常增量走 `sync-assets.yml`。
+> 日常增量走 `update-assets.yml` 的默认参数（`shards=1`）。
 
 ## 5. 增量同步（CI）
 
 ### 5.1 凭据：4 个 secrets
 
-`.github/workflows/sync-assets.yml` 已经把 rclone 的 remote 全写成 `RCLONE_CONFIG_R2_*`
+`.github/workflows/update-assets.yml` 已经把 rclone 的 remote 全写成 `RCLONE_CONFIG_R2_*`
 环境变量，不落任何配置文件。仓库 Settings → Secrets and variables → Actions 加：
 
 | Secret | 值 | 来源 |
@@ -443,7 +467,7 @@ rclone copy public r2:azurlane-assets \
 
 ### 5.5 触发方式：独立 workflow，不挂 cron
 
-`.github/workflows/sync-assets.yml`，只有 `workflow_dispatch`。
+`.github/workflows/update-assets.yml`，只有 `workflow_dispatch`。
 
 **没有嵌进 `update-data.yml`** 的原因：两条链路的失败面完全不同
 （UnityPy 解码 / 大文件网络 / R2 凭据），图片跑挂了不该把数据更新一起拖红
@@ -520,8 +544,9 @@ r2.dev 因为没有 Cache 规则，实际上只看对象上的 `Cache-Control` �
 | R2 受限 token 触发 `CreateBucket` 403 | ✅ 已加 `--s3-no-check-bucket` |
 | `spine` 无法自动 | ⚠️ 无生成器，只能从旧仓库搬一次；前端需 fallback |
 | `HANDOFF.md` 写着"已支持 spine" | ⚠️ 表述有误，实际不支持 |
-| 单 job 跑不下 painting 全量 | ✅ 新增 `regen-assets.yml`，crc32 分片并行，见 §4.5 |
+| 单 job 跑不下 painting 全量 | ✅ crc32 分片并行，见 §4.5 |
 | 每个分片从空 state 起手 ⇒ 每轮全量 | ✅ 改为继承基线 state + 差分合并，见 §4.5 |
+| 两个入口对 `--seed` 语义相反 | ✅ 合并为 `update-assets.yml`，seed 默认关，见 §4.5 |
 | `commit.py` 的「推送成功」不可信 | ⚠️ 已加推后回读校验，见 §5.6 |
 
 ## 8. 验收标准

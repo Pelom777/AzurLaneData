@@ -76,7 +76,7 @@ def pushed(branch: str, cwd: str | Path) -> bool:
 
     不能用 `git push` 的返回码判断成功：当远端**已经**包含 HEAD 时，git 会打印
     "Everything up-to-date" 并同样返回 0。也就是说它无法区分
-    「我推上去了」和「我的提交被 rebase 弄丢了」——后者在 regen-assets 的
+    「我推上去了」和「我的提交被 rebase 弄丢了」——后者在资源同步的
     merge job 里真实发生过一次（run 39641164165 打印了「已推送到 main」，
     但 main 上根本没有那个提交，最后只能从 artifact 恢复 state）。
     """
