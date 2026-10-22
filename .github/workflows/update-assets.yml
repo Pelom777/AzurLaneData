@@ -76,6 +76,10 @@ on:
         description: "一次性：只把桶里所有 *.json 的 Cache-Control 刷成 300s，不做生成"
         default: false
         type: boolean
+      prune:
+        description: "一次性：删掉指定的立绘目录（空格分隔的名字，不含 painting/ 前缀）"
+        default: ""
+        type: string
 
 concurrency:
   group: update-assets
@@ -106,7 +110,7 @@ jobs:
   # 这个 job 不装任何第三方依赖：azl_assets.py 的 cv2 / UnityPy 都是函数内导入，
   # 盘点模式走不到。整个 job 约 20 秒。
   prep:
-    if: ${{ !inputs.refresh_headers }}
+    if: ${{ !inputs.refresh_headers && inputs.prune == '' }}
     runs-on: ubuntu-latest
     outputs:
       shards: ${{ steps.decide.outputs.shards }}
@@ -162,7 +166,7 @@ jobs:
 
   assets:
     needs: prep
-    if: ${{ !inputs.refresh_headers }}
+    if: ${{ !inputs.refresh_headers && inputs.prune == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
@@ -381,7 +385,7 @@ jobs:
   # 靠它判断"这个资源我已经按哪个 md5 生成过了"。
   merge:
     needs: [prep, assets]
-    if: ${{ !inputs.dry_run && !inputs.refresh_headers && !cancelled() }}
+    if: ${{ !inputs.dry_run && !inputs.refresh_headers && inputs.prune == '' && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -575,3 +579,95 @@ jobs:
           for p in painting/baifeng_2/baifeng_2.json; do
             curl -sI "https://pub-85b4b8af407244bc8f1502127fc530c3.r2.dev/$p" | grep -i "cache-control\|^HTTP"
           done
+
+  # 删资源用。为什么单开一个入口而不是顺手在某个 job 里删：
+  #   · 生成链路是**增量**的，state 里没有的才会去做；已经不收录的资源它根本不会碰，
+  #     所以存量不会随着"规则改了"而自动消失（_hx 那次就是这个教训）。
+  #   · 删除是这里唯一不可逆的操作，必须能单独跑、单独看清楚它要删什么。
+  #
+  # 顺序有硬依赖：**先在数据侧剔除，再回来清资源**。
+  # 脚本会拿 public/data 的引用集挡一道 —— 名字还被引用就直接拒绝，
+  # 免得删出线上缺图。
+  #
+  # 用法：先跑一次不带 apply 的（下面第一步就是），看完对象数与体积再决定。
+  prune:
+    if: ${{ inputs.prune != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装 rclone
+        run: |
+          curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone.zip
+          unzip -oq /tmp/rclone.zip -d /tmp/rclone
+          cp /tmp/rclone/rclone-*/rclone /usr/local/bin/rclone
+          chmod +x /usr/local/bin/rclone
+          rclone version | head -1
+
+      - name: 检查 R2 凭据
+        run: |
+          missing=""
+          [ -z "$RCLONE_CONFIG_R2_ACCESS_KEY_ID" ] && missing="$missing R2_ACCESS_KEY_ID"
+          [ -z "$RCLONE_CONFIG_R2_SECRET_ACCESS_KEY" ] && missing="$missing R2_SECRET_ACCESS_KEY"
+          [ -z "${{ secrets.R2_ACCOUNT_ID }}" ] && missing="$missing R2_ACCOUNT_ID"
+          [ -z "${{ secrets.R2_BUCKET }}" ] && missing="$missing R2_BUCKET"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少 secrets:$missing（配置方法见 docs/CDN.md §5.1）"
+            exit 1
+          fi
+
+      # 先列一遍：看到的是"真要删掉多少东西"，不是脚本自说自话。
+      # 空目录（0 个对象）也算通过 —— 那种情况只需要清台账。
+      - name: 预览
+        id: preview
+        run: |
+          python scripts/prune_assets.py \
+            --data public/data \
+            --state .azl/assets-state.json \
+            --names ${{ inputs.prune }}
+
+      # 预览里被引用集挡下的话，上一步已经 die 了，走不到这里。
+      - name: 执行删除并清台账
+        id: do
+        run: |
+          python scripts/prune_assets.py \
+            --data public/data \
+            --state .azl/assets-state.json \
+            --bucket "${{ secrets.R2_BUCKET }}" \
+            --apply \
+            --names ${{ inputs.prune }}
+
+      - name: 验证已删
+        run: |
+          for n in ${{ inputs.prune }}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
+              "https://pub-85b4b8af407244bc8f1502127fc530c3.r2.dev/painting/$n/$n.json")
+            echo "$n → HTTP $code（期望 404）"
+          done
+
+      - name: 提交 state
+        run: |
+          if git diff --quiet -- .azl/assets-state.json; then
+            echo "state 无变化，跳过提交"
+            exit 0
+          fi
+          python scripts/commit.py --paths .azl/assets-state.json \
+            --message "chore(assets): 删掉 ${{ steps.do.outputs.pruned || 0 }} 个资源目录（${{ steps.do.outputs.objects || 0 }} 个对象）"
+
+      - name: 摘要
+        if: always()
+        run: |
+          {
+            echo "## 资源清理"
+            echo
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 立绘 | ${{ inputs.prune }} |"
+            echo "| 删除对象 / 体积 | ${{ steps.do.outputs.objects || 0 }} / $(( ${{ steps.do.outputs.bytes || 0 }} / 1048576 )) MB |"
+            echo "| 清理台账 | ${{ steps.do.outputs.keys || 0 }} 条 |"
+          } >> "$GITHUB_STEP_SUMMARY"

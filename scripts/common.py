@@ -150,6 +150,18 @@ def is_n_variant(name: str) -> bool:
     return bool(_N_VARIANT_RE.search(name.lower()))
 
 
+# `_asmr` 皮肤：同一张立绘的 ASMR 语音版，立绘本身与本体**完全同名同内容**
+# 的另一份包，不提供新图。收录它只会让前端列出两条同名皮肤
+# （`hu_2` 与 `hu_2_asmr` 都叫「临水的辰星」），对站点没有信息量。
+# 2026-10-23 起数据侧和资源侧都不收录。
+_ASMR_RE = re.compile(r"_asmr($|_)")
+
+
+def is_asmr(name: str) -> bool:
+    """名字是否是 `_asmr` 皮肤（立绘与本体重合，站点不收录）。"""
+    return bool(_ASMR_RE.search(name.lower()))
+
+
 # ---------------------------------------------------------------- git 对象
 
 def blob_sha1(data: bytes) -> str:

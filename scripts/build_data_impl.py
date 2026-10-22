@@ -30,8 +30,13 @@ from collections import defaultdict
 from pathlib import Path
 
 try:                                     # 由 build_data.py / check_data_diff.py 加载
-    from common import warn
+    from common import is_asmr, warn
 except ImportError:                      # 被当独立模块 import 时 scripts/ 可能不在 sys.path
+    _ASMR_RE = re.compile(r'_asmr($|_)')
+
+    def is_asmr(name):                   # 与 common.is_asmr 同一条正则，别各改各的
+        return bool(_ASMR_RE.search(name.lower()))
+
     def warn(message):
         print(f'[build_data_impl] {message}', file=sys.stderr)
 
@@ -415,6 +420,7 @@ def build_skin(raw_dir: Path) -> dict:
     stat, _tpl, _skin, group_ids, group_skins = build_index(raw_dir)
     codes = namecode_map(stat, group_ids, group_skins)
     out = {}
+    skipped_asmr = 0
     for group in sorted(group_skins):
         skins = group_skins[group]
         if not base_ship_id(group_ids, group):
@@ -426,6 +432,11 @@ def build_skin(raw_dir: Path) -> dict:
         for _sid, row in sorted(skins):
             painting = (row.get('painting') or '').lower()
             if not painting:
+                continue
+            # ASMR 版皮肤：立绘与本体重合，站点不收录。
+            # 留着它，前端会列出两条同名皮肤（`hu_2` 与 `hu_2_asmr` 都叫「临水的辰星」）。
+            if is_asmr(painting):
+                skipped_asmr += 1
                 continue
             entry[painting] = {
                 'painting': painting,
@@ -440,6 +451,8 @@ def build_skin(raw_dir: Path) -> dict:
     if left:
         warn(f'skin.json 仍有 {len(left)} 个 namecode 未解析：{", ".join(left[:8])}'
              '（补进 data/namecode.json 或等它成为某组默认皮肤）')
+    if skipped_asmr:
+        warn(f'skin.json 剔除 {skipped_asmr} 个 `_asmr` 皮肤（立绘与本体重合，站点不收录）')
     return out
 
 

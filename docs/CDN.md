@@ -462,6 +462,37 @@ painting/banjiu_n_ex   painting/wuzang_h_n      painting/a2_n
 存量：桶里 2,505 个 painting 目录、state 里 8,068 条，`_n` 均为 **0**
 （`--scope used` 一直在挡），所以这次不需要清理，只是把规则写进代码。
 
+### `_asmr`：与本体重合的语音版皮肤（2026-10-23 起不收录）
+
+`hu_2_asmr` / `aimudeng_5_asmr` / `haichou_2_asmr` / `jishang_3_asmr` 这 4 个是
+ASMR 语音版皮肤，立绘与本体是**同一张图**，只是挂了语音。收录它，
+前端就会列出两条同名皮肤（`hu_2` 与 `hu_2_asmr` 都叫「临水的辰星」）。
+
+过滤规则：`common.is_asmr()`（正则 `_asmr($|_)`），两个落点：
+
+| 链路 | 落点 | 效果 |
+|---|---|---|
+| 数据 | `build_data_impl.build_skin` | `skin.json` 不再产出 `_asmr` 条目（2,505 → 2,501） |
+| 资源 | `azl_assets` 目标枚举（引用集判断之前） | 不下载、不导出这些包，`--scope all` 也挡得住 |
+
+**执行顺序是硬依赖**：数据侧先剔除，资源侧才清得动。
+`scripts/prune_assets.py` 会拿 `public/data` 的引用集挡一道 ——
+名字还在引用集里就 `die`，防止删出线上缺图。
+所以流程是：
+
+```bash
+# 1）先让数据不含 _asmr（force=true 强制重解，contract 通过才提交）
+gh workflow run update-data.yml -f force=true
+# 2）再清资源（脚本会先列一遍对象数与体积）
+gh workflow run update-assets.yml -f prune="hu_2_asmr aimudeng_5_asmr haichou_2_asmr jishang_3_asmr"
+```
+
+`prune` 的三道安全线：不传 `--apply` 只列不删；名字必须是 `[a-z0-9_]+`；
+在引用集里的直接拒绝。
+
+> `data/new-ledger.json` 里那 4 条历史记录**保留**（它是内部新增台账，不上 CDN，
+> 也不影响站点）。删它等于抹掉历史。
+
 ## 4.8 R2 与旧仓库的文件树差异（2026-10-22 全量比对）
 
 删掉扁平 `paintingface` 之后，桶里 **28,151 个对象 / 10.01 GB**（旧仓库 19,443 / 6.99 GB）。
@@ -848,6 +879,8 @@ r2.dev 因为没有 Cache 规则，实际上只看对象上的 `Cache-Control` �
 | 三个验收用临时 workflow 未清 | ✅ p0-probe / scripts32-probe / stage1-verify 已删（2026-10-22） |
 | `seed-legacy.yml` | ⚠️ **保留**：spine（6,363 文件 / 1.10 GB）还没搬，它是搬存量资产的唯一入口，搬完再删 |
 | json 与图片共用 86400 缓存头 | ✅ 已按扩展名分开，见 §4.6 |
+| `_asmr` 皮肤让前端列出两条同名项 | ✅ 数据与资源两侧都不收录，见 §4.7 |
+| 不收录的资源不会自动从桶里消失 | ✅ `prune` 入口（先预览再删 + 引用集拦截），见 §4.7 |
 
 ## 8. 验收标准
 
