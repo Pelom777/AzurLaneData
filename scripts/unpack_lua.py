@@ -27,7 +27,8 @@ B. `scripts32`             —— 39 MB，整体加密的 UnityFS
     已跑通：`weapon_name` 2422 段 → bcdec 全成功（1.5s）→ ljd 逐段反编译
             （2.7s）→ 2422 条，产出的 json 与旧链路**逐字节相同**
             （md5 ed8329b1b0601b00b64e13b8e6a24f53 / 85,011 字节）。
-            证据见 scripts/p0_probe.py 的 report。
+            证据见探针 report（脚本 scripts/p0_probe.py 已于 2026-10-23 删除，
+            需要时从 git 历史取）。
     重要修正：**不要**把多段字节码拼起来再反编译（原写法如此，实测三种拼法
             全部失败，报 `'NoneType' object has no attribute 'constants'`）。
             每段在 bcdec 之后本身就是一份完整 dump，必须**逐段反编译、

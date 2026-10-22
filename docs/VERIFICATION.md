@@ -161,8 +161,8 @@ marker。用 9 行假清单单测过：
   **已于 2026-10-22 删除**（验收用临时件，历史用途见本文档 §复现）。
   现在要验证解包，dispatch `update-data.yml`（`force=true` 强制重解、
   `dry_run=true` 只跑不提交）。配套脚本 `scripts/p0_probe.py` /
-  `scripts/stage1_report.py` 还在，但已没有 workflow 调它们 —— 需要时再从
-  git 历史里把 workflow 捞回来即可。
+  `scripts/stage1_report.py` 也已于 2026-10-23 一并删除 —— 需要时从 git 历史取：
+  `git show <删除前那次提交>:scripts/p0_probe.py`
 
 ## 阶段 3：资源上 CDN
 

@@ -56,8 +56,10 @@ bundle 文件
 > BC dump（实测 2422/2422 段都以 `1b 4c 4a 02 02` 开头、`00` 结尾），必须
 > **逐段反编译再拼文本**。三种拼接字节码的写法全部失败，报
 > `'NoneType' object has no attribute 'constants'`。同理 `bcdec` 的输出不要按
-> `out[5:-1]` 剥头尾 —— 剥了 ljd 就无头可读。证据：`scripts/p0_probe.py` 的
-> report（H1/H2 通过，H3/H4/H5 全挂，H6 生产路径通过）。
+> `out[5:-1]` 剥头尾 —— 剥了 ljd 就无头可读。证据：探针 report
+> （H1/H2 通过，H3/H4/H5 全挂，H6 生产路径通过）。
+> 探针脚本 `scripts/p0_probe.py` 已于 2026-10-23 随验收 workflow 一起删除，
+> 需要复现时从 git 历史取：`git show <删除前那次提交>:scripts/p0_probe.py`。
 
 
 **分段逻辑已实测**：`barrage_template_2` 切出 219 段，`idx` 正好走到文件末尾，
