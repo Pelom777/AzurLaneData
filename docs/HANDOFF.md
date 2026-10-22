@@ -348,7 +348,8 @@ Class B 基本不怎么消耗。
 ```bash
 pip install -r requirements.txt      # UnityPy + ljd（版本已锁定）
 chmod +x tools/bcdec tools/uabdec    # 静态 32 位 ELF，实测不需要 libc6:i386
-# 纯 Windows 跑不了 ELF：用 WSL，或者直接交给 CI（p0-probe.yml）
+# 纯 Windows 跑不了 ELF：用 WSL，或者直接交给 CI
+# （dispatch update-data.yml，它自带 force / dry_run 两个开关）
 
 python scripts/unpack_lua.py --server CN --out raw --work work --only weapon_name
 ```

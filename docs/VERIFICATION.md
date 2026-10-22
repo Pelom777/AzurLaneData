@@ -157,9 +157,12 @@ marker。用 9 行假清单单测过：
 - `get_version()` 没有重试：登录服偶发抖动会让那一次 run 变红（不影响数据）。
 - 阶段 3 的**首次 6.8 GB 播种**要本地做（R2 凭据就位后）；阶段 4（前端切 CDN）未开始。
 - `spine` 1.10 GB 无法自动更新，只能从旧仓库搬一次。
-- `p0-probe.yml` / `stage1-verify.yml` / `scripts32-probe.yml` 与
-  `scripts/p0_probe.py` / `scripts/stage1_report.py` 是**验收用临时件**，
-  阶段 4 切换完成后可删。
+- ~~`p0-probe.yml` / `stage1-verify.yml` / `scripts32-probe.yml`~~
+  **已于 2026-10-22 删除**（验收用临时件，历史用途见本文档 §复现）。
+  现在要验证解包，dispatch `update-data.yml`（`force=true` 强制重解、
+  `dry_run=true` 只跑不提交）。配套脚本 `scripts/p0_probe.py` /
+  `scripts/stage1_report.py` 还在，但已没有 workflow 调它们 —— 需要时再从
+  git 历史里把 workflow 捞回来即可。
 
 ## 阶段 3：资源上 CDN
 
@@ -281,10 +284,14 @@ state 现有 2502 条：CN=2502
 ## 复现
 
 ```bash
-# 单表 P0
-gh workflow run p0-probe.yml            # 或 push 改动触发
-# 全量等价比对
-gh workflow run stage1-verify.yml
 # 正式流水线（不提交）
 gh workflow run update-data.yml -f force=true -f dry_run=true
+# 资源侧只盘点不生成
+gh workflow run update-assets.yml -f dry_run=true
+# 冲刷桶里 json 的缓存头（一次性补救，见 docs/CDN.md §4.6）
+gh workflow run update-assets.yml -f refresh_headers=true
 ```
+
+> 单表 P0（`p0-probe.yml`）与全量等价比对（`stage1-verify.yml`）已删，
+> 需要复现时从 git 历史取：
+> `git show $(git log --diff-filter=D --format=%H -1 -- .github/workflows/p0-probe.yml)^:.github/workflows/p0-probe.yml`

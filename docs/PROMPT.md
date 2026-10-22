@@ -51,7 +51,8 @@
 - 任何"看起来成功了"的结论，都要给一条可复查的证据（对象数、字节数、diff 行数）。
 
 **环境限制**：本地是 Windows，`tools/bcdec` 和 `tools/uabdec` 是 **Linux 静态 32 位 ELF**，
-本地跑不了。验证解包请用 CI（`p0-probe.yml`），不要试图在本地装 WSL 绕。
+本地跑不了。验证解包请用 CI（dispatch `update-data.yml`，它有 force / dry_run 两个开关），
+不要试图在本地装 WSL 绕。
 
 **我没有**：GHCR 的 token（官方 Docker 镜像 `ghcr.io/azurlanetools/azex/azex` 是私有的，
 用不了，只能靠 `tools/` 里的二进制）。
