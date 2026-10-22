@@ -390,6 +390,35 @@ public/squareicon/y.png      →  r2:<bucket>/squareicon/y.png
 > 注意 `data/`（仓库根目录）里的 `version.json` / `new-ledger.json` 是**内部账本**，
 > 不上 CDN。前端读的是 `public/data/` 下那份。
 
+## 4.7 和谐版资源（`_hx`）一律不要
+
+国服对部分立绘、图标做过删改，游戏里以 `_hx` 结尾另存一份，例如：
+
+```text
+painting/2b_hx              painting/2b_bj1_hx_tex
+painting/baifeng_2/ 里的 shop_hx 图层
+paintingface/bangkeshan_2_hx_0.png
+squareicon/xxx_hx.png
+```
+
+站点**从不收录**这类资源。依据不是猜的：对照原前端仓库 `AzurLaneTools` 的
+`public/painting`（2,159 个目录），含 `_hx` 的是 **0 个**。
+
+所以在两个地方做了硬过滤（`common.is_censored`，正则 `_hx($|_)`）：
+
+| 位置 | 作用 |
+|---|---|
+| `azl_assets` 的目标枚举 | 跳过所有 `_hx` 资源，放在引用集判断**之前**，`--scope all` 也挡得住 |
+| `painting_site._walk` | 拼图 json 里不出现 `_hx` 图层（整棵子树跳过） |
+
+**为什么必须写在代码里而不是靠 `--scope used`**：`paintingface` 不在
+`USED_SCOPED` 里（它不按引用集过滤），所以清单里的 `_hx` 表情包会被整包导出；
+立绘的 `shop_hx` 图层则来自 layout 里的 GameObject 名，与引用集无关。
+
+**已清理的存量**（2026-10-22）：188 个对象 —— 14 张立绘里的 28 个
+`shop_hx.{png,-mesh.obj}`，加 160 个 `paintingface/*_hx_*.png`。
+那 14 张立绘的台账条目已删除，重跑后 json 不再含 `shop_hx`。
+
 ## 5. 增量同步（CI）
 
 ### 5.1 凭据：4 个 secrets

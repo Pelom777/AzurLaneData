@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -114,6 +115,24 @@ def landed(cwd: str | Path, branch: str, snapshot: dict[str, str]) -> bool:
         if got != want:
             return False
     return True
+
+
+# ---------------------------------------------------------------- 资源命名规则
+
+# 和谐版资源（国服删改过的立绘/图标）。游戏里以 `_hx` 结尾，例如
+#   painting/2b_hx、painting/2b_bj1_hx_tex、squareicon/xxx_hx
+# 站点从不收录：对照原前端仓库 AzurLaneTools 的 public/painting（2,159 个目录），
+# 含 `_hx` 的有 **0 个**。所以这是一条硬规则，不是白名单。
+_CENSORED_RE = re.compile(r"_hx($|_)")
+
+
+def is_censored(name: str) -> bool:
+    """名字是否属于和谐版资源。
+
+    匹配 `_hx` 作为独立后缀段：`2b_hx`、`2b_bj1_hx_tex`、`2b_n_hx_tex` 都命中，
+    而把 `_hx` 出现在中段却不属于后缀的情况排除掉。
+    """
+    return bool(_CENSORED_RE.search(name.lower()))
 
 
 # ---------------------------------------------------------------- git 对象

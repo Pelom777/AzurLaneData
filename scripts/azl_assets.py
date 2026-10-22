@@ -35,7 +35,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from common import append_summary, die, log, set_output, warn  # noqa: E402
+from common import (append_summary, die, is_censored,  # noqa: E402
+                    log, set_output, warn)
 
 # --------------------------------------------------------------------------- 常量
 
@@ -706,7 +707,7 @@ def main() -> int:
 
     report = {'new': 0, 'changed': 0, 'skipped': 0, 'seeded': 0, 'failed': 0,
               'files': 0, 'unused': 0, 'other_shard': 0, 'no_texture': 0,
-              'pending': 0, 'pending_bytes': 0}
+              'censored': 0, 'pending': 0, 'pending_bytes': 0}
     written: list[Path] = []
     items = args.items or ['painting', 'squareicon', 'shipicon']
     if shard_n > 1:
@@ -749,6 +750,15 @@ def main() -> int:
             # 分片：crc32 而不是 hash()，后者按进程随机化，换一次进程分片就变了
             if shard_n > 1 and zlib.crc32(name.encode()) % shard_n != shard_i:
                 report['other_shard'] += 1
+                continue
+            # 和谐版资源一律不要：名字里带 `_hx` 的立绘、图标、表情全跳过。
+            # 对照旧前端仓库 public/（2,159 个 painting 目录、0 个含 _hx）确认过，
+            # 站点从不收录这类资源，属于硬规则。放在引用集判断之前，
+            # 这样 --scope all 也不会把它们导出来。
+            if is_censored(name):
+                report['censored'] += 1
+                if scoped and name in used:
+                    warn(f'{path} 是和谐版但被 data 引用了 —— 跳过会缺图，需要人工确认')
                 continue
             if scoped and name not in used:
                 report['unused'] += 1
@@ -882,7 +892,8 @@ def main() -> int:
 
     log(f'完成: 新增 {report["new"]}, 变更 {report["changed"]}, '
         f'跳过 {report["skipped"]}, 失败 {report["failed"]}, '
-        f'无贴图 {report["no_texture"]}, 未被引用 {report["unused"]}'
+        f'无贴图 {report["no_texture"]}, 和谐版 {report["censored"]}, '
+        f'未被引用 {report["unused"]}'
         + (f', 他片 {report["other_shard"]}' if shard_n > 1 else ''))
     if report['seeded']:
         log(f'  其中 {report["seeded"]} 个是状态播种（产物已在磁盘，只补 state 记录）')

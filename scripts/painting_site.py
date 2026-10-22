@@ -25,7 +25,7 @@ import json
 import re
 from pathlib import Path
 
-from common import log, warn
+from common import is_censored, log, warn
 
 SKIP_NODES = ('frameContain', 'Touch')
 FRAME_NODE = 'mainFullScreen'
@@ -147,6 +147,10 @@ class PaintingExporter:
         go = trans.m_GameObject.read()
         name = go.m_Name
         if name in SKIP_NODES:
+            return
+        # 和谐版图层（shop_hx 之类）整棵子树都不要：
+        # 站点从不收录，写进 json 会让前端多请求一张不该存在的图。
+        if is_censored(name):
             return
         if name == FRAME_NODE:
             self.frame = trans
