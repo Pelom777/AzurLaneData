@@ -95,6 +95,13 @@ SOURCE_PREFIX = {
 # 而游戏清单有 2671 个 —— 全量导出会多出几百个没人引用的文件。
 USED_SCOPED = {'painting', 'squareicon', 'shipicon', 'equipicon'}
 
+# 不再作为独立类别导出的条目。
+# `paintingface` 单独导出会写成扁平文件 paintingface/<name>_<i>.png，
+# 而前端读的是子目录布局 paintingface/<name>/<i>.png（由 painting 导出时
+# 经由 export_faces 产出）。两套布局各自导出过一次，2026-10-22 清掉了
+# 13,799 个扁平文件 / 1.4 GB。留着这个护栏，避免有人手滑又跑一遍。
+OBSOLETE_ITEMS = {'paintingface'}
+
 UA = {'User-Agent': 'Mozilla/5.0 (compatible; azl-assets/1.0)'}
 
 # 当前资源包的 Unity 版本（实测 2022.3.62f3），用于少数没写版本号的包
@@ -722,6 +729,9 @@ def main() -> int:
             warn('public/data 不可用，回退为全量导出（--scope all）')
 
     for item in items:
+        if item in OBSOLETE_ITEMS:
+            warn(f'{item} 不再作为独立类别导出（表情由 painting 顺带产出），已跳过')
+            continue
         mapping = get_list(CATEGORY_LIST.get(item, 'az'))
         if not mapping:
             continue

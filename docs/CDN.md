@@ -419,6 +419,32 @@ squareicon/xxx_hx.png
 `shop_hx.{png,-mesh.obj}`，加 160 个 `paintingface/*_hx_*.png`。
 那 14 张立绘的台账条目已删除，重跑后 json 不再含 `shop_hx`。
 
+## 4.8 R2 与旧仓库的文件树差异（2026-10-22 全量比对）
+
+删掉扁平 `paintingface` 之后，桶里 **28,151 个对象 / 10.01 GB**（旧仓库 19,443 / 6.99 GB）。
+逐目录比对：
+
+| 目录 | R2 | 旧仓库 | 差 | 说明 |
+|---|---|---|---|---|
+| painting | 9,746 | 7,832 | +1,914 | 2,505 vs 2,159 张，且当前版本图层更多 |
+| paintingface | 12,626 | 290 | +12,336 | 覆盖扩张：旧仓库只给 42 张做了表情，现在 2,092 张；旧的 42 张全在其中 |
+| spine | **0** | 6,363 | −6,363 | **未搬**，脚本无生成器（见 §7） |
+| squareicon | 2,507 | 2,164 | +343 | 新船 |
+| shipicon | 2,502 | 2,157 | +345 | 新船 |
+| equipicon | 496 | 495 | +1 | |
+| iconframe | 141 | 9 | +132 | 未按引用集过滤；前端只用到 `<稀有度>.png` / `1<稀有度>.png`，约 12 个 |
+| shipbackground / juusui / iconbackground / voteicon / squareback / spinebase | 70/14/9/8/5/5 | 同 | 0 | 完全一致 |
+| data | 22 | 21 | +1 | 多 `new-latest.json`（新增台账，正常） |
+| _headers | 0 | 1 | −1 | Cloudflare Pages 的响应头文件，R2 用不上 |
+
+**异常扫描**（应为 0）：`painting/` 下扁平文件 **0**、任何位置含 `_hx` **0**、
+0 字节对象 **3**（`data/2017-cn.json`、`2019-en.json`、`2019-jp.json` —— 仓库里本来就是空文件）。
+
+**语义抽查**：随机 40 张立绘，取 json 后逐层核对
+「每个图层的 `.png`、非 `raw` 图层的 `-mesh.obj`、`face.list` 里每个序号」是否都在桶里 —— **全部齐全**。
+
+唯一的实质缺口是 `spine`。
+
 ## 5. 增量同步（CI）
 
 ### 5.1 凭据：4 个 secrets

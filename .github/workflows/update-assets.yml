@@ -45,7 +45,7 @@ on:
     inputs:
       items:
         description: "资源类别（空格分隔）"
-        default: "painting paintingface squareicon shipicon equipicon iconframe"
+        default: "painting squareicon shipicon equipicon iconframe"
         type: string
       shards:
         description: "分片数：0=按待处理量自动决定（默认）；1..16=强制指定"

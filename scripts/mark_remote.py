@@ -41,8 +41,11 @@ import sys
 from pathlib import Path
 
 # azl_assets.py 里 CATEGORY_LIST 有产物的类别；marker 一律是 <name>.png
+# 只列「扁平产物 <item>/<name>.png」的类别。
+# paintingface 不在这里：它的产物是子目录布局 paintingface/<name>/<i>.png，
+# 由 painting 导出时顺带产出，不作为独立类别处理。
 PNG_MARKER_ITEMS = {
-    "paintingface", "squareicon", "shipicon", "equipicon", "iconframe",
+    "squareicon", "shipicon", "equipicon", "iconframe",
     "item", "bg", "skillicon", "herohrzicon", "equips", "shipyardicon",
     "memoryicon", "neweducateicon", "qicon",
 }
