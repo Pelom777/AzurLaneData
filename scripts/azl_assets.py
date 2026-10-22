@@ -672,6 +672,11 @@ def main() -> int:
     ap.add_argument('--force', action='store_true', help='忽略增量状态，全部重跑')
     ap.add_argument('--report-files', default='',
                     help='把本次写出的文件写成 NUL 分隔清单，供 commit.py --paths-from 使用')
+    ap.add_argument('--report-failures', default='',
+                    help='把失败资源的名单写成 json（path / item / size / reason）。'
+                         '只报 failed=N 是没法排查的：日志滚过去就找不到了，'
+                         '而失败项不写 state，下一轮会自己重试，'
+                         '真正需要的是"这一轮到底哪几个没过"')
     ap.add_argument('--no-face', action='store_true', help='不导出表情')
     ap.add_argument('--seed', action='store_true',
                     help='状态播种：目标文件已存在就视为已同步，并把当前 md5 记进 state。'
@@ -746,6 +751,7 @@ def main() -> int:
               'files': 0, 'unused': 0, 'other_shard': 0, 'no_texture': 0,
               'censored': 0, 'n_variant': 0,
               'pending': 0, 'pending_bytes': 0}
+    failures: list[dict] = []
     written: list[Path] = []
     items = args.items or ['painting', 'squareicon', 'shipicon']
     if shard_n > 1:
@@ -901,6 +907,8 @@ def main() -> int:
             except Exception as exc:
                 warn(f'{path} 处理失败: {type(exc).__name__}: {exc}')
                 report['failed'] += 1
+                failures.append({'path': path, 'item': item, 'size': info['size'],
+                                 'reason': f'{type(exc).__name__}: {exc}'})
                 continue
             if files is None:
                 # 包里没有 Texture2D（纯 prefab）。不是失败，但必须记进 state，
@@ -915,6 +923,8 @@ def main() -> int:
                 warn(f'{path} 处理失败: 有贴图但一张也没导出来'
                      f'（bundle {info["size"]} B）')
                 report['failed'] += 1
+                failures.append({'path': path, 'item': item, 'size': info['size'],
+                                 'reason': '有贴图但一张也没导出来'})
                 continue
             written.extend(files)
             report['changed' if key in prev else 'new'] += 1
@@ -952,6 +962,23 @@ def main() -> int:
                 entries.append(p.as_posix())
         target.write_bytes(b''.join(i.encode('u8') + b'\0' for i in entries))
         log(f'写出文件清单 {target}: {len(entries)} 个')
+
+    # 失败名单单独落盘：进了 artifact 才能跨 job 汇总，也不用在几万行日志里翻。
+    # 失败项刻意不写 state，下一轮会自己重试，所以这个文件只是"这一轮谁没过"。
+    if args.report_failures:
+        ftarget = Path(args.report_failures)
+        ftarget.parent.mkdir(parents=True, exist_ok=True)
+        ftarget.write_text(json.dumps(
+            {'shard': args.shard or '1/1', 'server': server, 'failures': failures},
+            ensure_ascii=False, indent=1), 'u8')
+        log(f'失败名单 {ftarget}: {len(failures)} 个')
+
+    if failures:
+        # 全量重跑时若上游挂了，失败可能是几千个 —— 日志刷屏会把真正的原因埋掉，
+        # 所以只列前 20 条，全量看 json。
+        log(f'失败明细（共 {len(failures)} 个，以下最多列 20 条）：')
+        for f in failures[:20]:
+            log(f'  × {f["path"]}（{f["item"]}, {f["size"]} B）{f["reason"]}')
 
     log(f'完成: 新增 {report["new"]}, 变更 {report["changed"]}, '
         f'跳过 {report["skipped"]}, 失败 {report["failed"]}, '

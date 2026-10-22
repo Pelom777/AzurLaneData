@@ -266,7 +266,8 @@ jobs:
           ARGS="--server $SERVER --public public --cache .azl/bundles \
                 --state .azl/state-$SHARD.json --scope ${{ inputs.scope }} \
                 --items ${{ inputs.items }} --shard $SHARD/$N \
-                --report-files .azl/written-$SHARD.list"
+                --report-files .azl/written-$SHARD.list \
+                --report-failures .azl/failed-$SHARD.json"
           if [ "${{ inputs.limit }}" != "0" ]; then ARGS="$ARGS --limit ${{ inputs.limit }}"; fi
           if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
@@ -350,6 +351,14 @@ jobs:
         run: |
           mkdir -p .azl/frag
           cp ".azl/state-${{ matrix.shard }}.json" ".azl/frag/state-${{ matrix.shard }}.json"
+          # 失败名单可能不存在：--plan 不会跑到生成，清单为空的片也不会写文件。
+          # 但文件必须存在 —— 下面 upload-artifact 设了 if-no-files-found: error，
+          # 而且 merge 那头是 glob 汇总，缺一片就会静默少算。
+          if [ -f ".azl/failed-${{ matrix.shard }}.json" ]; then
+            cp ".azl/failed-${{ matrix.shard }}.json" ".azl/frag/failed-${{ matrix.shard }}.json"
+          else
+            echo '{"failures": []}' > ".azl/frag/failed-${{ matrix.shard }}.json"
+          fi
           cat > ".azl/frag/report-${{ matrix.shard }}.json" <<EOF
           {"shard": ${{ matrix.shard }},
            "new": ${{ steps.gen.outputs.new || 0 }},
@@ -449,8 +458,52 @@ jobs:
           with open('.azl/total.env', 'w', encoding='utf-8') as fh:
               for k, v in tot.items():
                   fh.write(f'{k}={v}\n')
+
+          # 失败名单跨片汇总。以前只有 failed=N 这一个数字，日志一滚就查不到
+          # 是哪个资源、为什么。落一份文本给下一步贴进摘要。
+          # 口径提醒：失败项刻意不写 state，所以下一轮会自己重试 ——
+          # 这份名单是"这一轮谁没过"，不是"永久失败清单"。
+          rows = []
+          for p in sorted(glob.glob('.azl/states/failed-*.json')):
+              d = json.load(open(p, encoding='utf-8'))
+              for f in (d.get('failures') or []):
+                  # 异常信息里可能有换行 / 制表符 / 竖线：换行会撕坏下面的 TSV，
+                  # 竖线会撕坏摘要里的 markdown 表格，一律压成单空格。
+                  reason = ' '.join(str(f.get('reason', '')).split()).replace('|', r'\|')
+                  rows.append((f.get('item', '?'), f.get('path', '?'),
+                               int(f.get('size') or 0), reason))
+          with open('.azl/failures.txt', 'w', encoding='utf-8') as fh:
+              for item, path, size, reason in rows:
+                  fh.write(f'{item}\t{path}\t{size}\t{reason}\n')
+          print(f'失败名单 {len(rows)} 条 → .azl/failures.txt')
+          # 大量失败时（上游挂了会一次几百个）别把 warning 刷满整页
+          for item, path, size, reason in rows[:20]:
+              print(f'::warning::{item} {path} 失败：{reason}')
+          if len(rows) > 20:
+              print(f'::warning::另有 {len(rows) - 20} 条失败，见摘要表格')
           PY
           cat .azl/total.env >> "$GITHUB_OUTPUT"
+
+      - name: 失败名单
+        run: |
+          f=.azl/failures.txt
+          if [ ! -f "$f" ] || [ ! -s "$f" ]; then
+            echo "本轮无失败资源" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          n=$(wc -l < "$f")
+          {
+            echo "### 失败资源 $n 个"
+            echo
+            echo "| 类别 | 资源 | 包大小 | 原因 |"
+            echo "|---|---|---|---|"
+            # 摘要里全列：这里不是日志，滚动条比缺失信息好。
+            while IFS=$'\t' read -r item path size reason; do
+              echo "| $item | \`$path\` | $size B | $reason |"
+            done < "$f"
+            echo
+            echo "失败项不写 state，下一轮 dispatch 会自动重试。"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 提交 state
         run: |
