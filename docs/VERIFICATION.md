@@ -242,6 +242,25 @@ push 被拒 → `commit.py` 自动 `pull --rebase` 重试 → 提交丢了 → �
 超出部分约 $0.015/GB-month ≈ 每月一角多，不是钱的问题，
 但需要你决定：spine 是搬、还是不搬。
 
+### 合并后的单一入口（run `39723185349`）
+
+`update-assets.yml`，`items=squareicon shards=1 limit=3`，三个 job 全绿：
+
+```
+prep       3/3   steps
+assets (0) 18/18 steps
+merge      10/10 steps
+
+片段 1 个 → 应用 3 条，冲突 0 条
+state 现有 2502 条：CN=2502
+合计：新增 3 / 变更 0 / 失败 0 / 写出文件 3
+[azl] 已推送到 main（已回读远端校验）
+→ commit 58c22a78  assets: 新增 3 / 变更 0（1 片）
+```
+
+三件事同时得到验证：`shards=1` 的矩阵退化正确、分片账目 `report-N.json`
+汇总后真的进了提交信息、以及 `pushed()` 推后回读校验生效。
+
 ## 复现
 
 ```bash
