@@ -45,26 +45,22 @@ def rclone(args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(['rclone', *args], capture_output=True, text=True)
 
 
-def list_objects(bucket: str, prefix: str) -> list[dict]:
-    """列出某个前缀下的对象。lsjson 的输出是逐行 JSON（不是整体数组）。"""
-    p = rclone(['lsjson', f'r2:{bucket}/{prefix}',
-                '--files-only', '--recursive', '--s3-no-check-bucket'])
+def count_objects(bucket: str, prefix: str) -> tuple[int, int]:
+    """数某个前缀下的对象数与总字节数。
+
+    用 `rclone size` 而不是 `lsjson` 逐个枚举：实测 `lsjson <前缀>` 只返回 1 个
+    对象（实际是 3 个 json/png/mesh），报出来的数会严重偏低 —— 而删除是按整个
+    前缀删的，预览说 1 个、实际删 3 个，这种数字不如不报。
+    `size` 是 rclone 专门为这个场景做的，一次给出 count 与 bytes。
+    """
+    p = rclone(['size', f'r2:{bucket}/{prefix}', '--json', '--s3-no-check-bucket'])
     if p.returncode != 0:
-        die(f'列不出 r2:{bucket}/{prefix}：{p.stderr.strip()[:300]}')
-    out = []
-    for line in p.stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            warn(f'lsjson 输出了一行不是 JSON 的内容，跳过：{line[:120]}')
-            continue
-        if obj.get('IsDir'):
-            continue
-        out.append(obj)
-    return out
+        die(f'量不出 r2:{bucket}/{prefix}：{p.stderr.strip()[:300]}')
+    try:
+        info = json.loads(p.stdout.strip())
+    except json.JSONDecodeError:
+        die(f'rclone size 的输出不是 JSON：{p.stdout.strip()[:200]}')
+    return int(info.get('count') or 0), int(info.get('bytes') or 0)
 
 
 def load_used_names(data_dir: Path) -> set[str]:
@@ -143,9 +139,8 @@ def main() -> int:
     for name in names:
         prefix = f'{args.prefix}/{name}'
         if args.bucket:
-            objs = list_objects(args.bucket, prefix)
-            size = sum(int(o.get('Size') or 0) for o in objs)
-            log(f'{prefix}：{len(objs)} 个对象 / {size / 1048576:.2f} MB')
+            n_objects, size = count_objects(args.bucket, prefix)
+            log(f'{prefix}：{n_objects} 个对象 / {size / 1048576:.2f} MB')
             if args.apply:
                 p = rclone(['delete', f'r2:{args.bucket}/{prefix}',
                             '--s3-no-check-bucket', '--stats', '10s',
@@ -153,8 +148,10 @@ def main() -> int:
                 if p.returncode != 0:
                     warn(f'{prefix} 删除失败：{p.stderr.strip()[:300]}')
                     continue
-                log(f'  已删 {prefix}（{len(objs)} 个对象）')
-            total_objects += len(objs)
+                # 删除是全前缀删除，不依赖上面数出来的清单，所以数完再删
+                # 与删完再数是两回事 —— 这里报的是"删之前有多少"
+                log(f'  已删 {prefix}（删前 {n_objects} 个对象）')
+            total_objects += n_objects
             total_bytes += size
         else:
             log(f'{prefix}：没给 --bucket，只做台账清理')
