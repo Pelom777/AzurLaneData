@@ -143,6 +143,16 @@ class PaintingExporter:
 
     def _walk(self, trans):
         if trans.object_reader.type.name != 'RectTransform':
+            # 普通 Transform 没有 m_SizeDelta / m_Pivot / m_AnchoredPosition，
+            # 自己当不了图层 —— 但它的子树里可能有真图层，不能整棵丢掉。
+            # bisimaiz 就是这样：根 → layers → bisimaiz_rw → layers(普通 Transform)
+            #   → part / part 两个带 m_Sprite 的节点。以前在这里 return，
+            # 结果那张立绘少了 rw 图层，画面上就缺一块。
+            for child in getattr(trans, 'm_Children', None) or []:
+                try:
+                    self._walk(child.read())
+                except Exception:
+                    continue
             return
         go = trans.m_GameObject.read()
         name = go.m_Name

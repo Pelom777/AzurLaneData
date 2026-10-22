@@ -445,6 +445,40 @@ squareicon/xxx_hx.png
 
 唯一的实质缺口是 `spine`。
 
+## 4.9 普通 Transform 会截断图层遍历（已修）
+
+`painting_site._walk` 原来第一句是：
+
+```python
+if trans.object_reader.type.name != 'RectTransform':
+    return
+```
+
+本意是「普通 Transform 没有 size/pivot/anchor，当不了图层」。但它连带把**整棵子树**
+丢掉了 —— 而子树里可能有真图层。
+
+`bisimaiz` 就是现场：
+
+```text
+bisimaiz (RectTransform, 有 m_Sprite)          ← 导出成基底层
+  layers
+    bisimaiz_rw
+      layers          ← 普通 Transform，在这里 return，下面全丢
+        part (m_Sprite)
+        part (m_Sprite)
+```
+
+结果是那张立绘只有基底层，画面上少一块。对照旧仓库 `public/painting/bisimaiz`
+是 7 个文件，我们只有 3 个。
+
+修法：非 RectTransform 不当图层，但**继续遍历子节点**。
+
+影响面：两边都有的 2,157 张立绘里，**39 张**的文件数比旧仓库少（`bisimaiz` 差 4 个最多）。
+修完对全部 painting 做了一次 `force=true` 重导。
+
+图层命名：`part` / `part_2`（旧仓库当年是 `bisimaiz_rw0` / `rw1`，因为那时节点名就是那个）。
+前端只用 key 拼文件名，功能无差别，不做额外美化。
+
 ## 5. 增量同步（CI）
 
 ### 5.1 凭据：4 个 secrets
