@@ -32,6 +32,8 @@ concurrency:
 
 permissions:
   contents: write
+  # 数据落盘后要触发资源同步（见末尾「触发资源同步」一步）
+  actions: write
 
 env:
   SERVER: ${{ inputs.server || 'CN' }}
@@ -173,6 +175,24 @@ jobs:
           python scripts/commit.py \
             --paths public/data data/version.json data/new-ledger.json \
             --message "data: ${{ env.SERVER }} ${{ steps.ver.outputs.version }}"
+
+      # 数据先落地，图片再跟上 —— 这个顺序是硬依赖，不能靠人记得。
+      #
+      # 2026-10-22 现场：assets 在 12:50 跑（用 git 里 9.7.398 的 public/data
+      # 算 --scope used），data 在 13:04 才更新到 9.7.410。结果 data 引用了
+      # 14 张新立绘（水星号 / 长蛇号 / 铁甲号 …），而 R2 上一张都没有，
+      # 前端直接裂图。人肉记住顺序，早晚会漏。
+      #
+      # 只在「版本真的变了 + 契约校验通过 + 不是干跑」时触发，
+      # 否则每小时 cron 都会白踢一次图片流水线。
+      - name: 触发资源同步
+        if: steps.ver.outputs.changed == 'true' && steps.contract.outcome == 'success' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run update-assets.yml --ref main
+          echo "已触发 update-assets（${{ env.SERVER }} ${{ steps.ver.outputs.version }}）"
+          echo "它自己会盘点待处理量并决定分几片，见 docs/CDN.md §4.5"
 
       - name: 摘要
         if: always()
