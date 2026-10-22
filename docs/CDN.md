@@ -533,9 +533,9 @@ rclone copy public r2:azurlane-assets \
 版本没变时不会有人 dispatch，所以 R2 操作数是 0。想接成自动的话，在
 `update-data.yml` 末尾加一个 `workflow_dispatch` 调用即可，但建议先手动跑几轮确认增量正确。
 
-### 5.6 `commit.py` 的「推送成功」不可信（已加固）
+### 5.6 `commit.py` 的「推送成功」不可信（加固过两次）
 
-**现场**：run `39641164165` 的 merge job 日志打印了
+**第一次现场**：run `39641164165` 的 merge job 日志打印了
 
 ```
 推送失败（1/3）：! [rejected]  HEAD -> main (fetch first)
@@ -548,31 +548,38 @@ rclone copy public r2:azurlane-assets \
 - `contents?path=.azl/assets-state.json` → 只有 8 条（全部 squareicon）
 - `commits?path=.azl/assets-state.json` → 只有 2 条历史
 
-**根因**：`scripts/common.py` 的 `commit_and_push` 把 `git push` 的返回码 0
-直接当成成功。而 git 在**远端已经包含 HEAD** 时会打印
-`Everything up-to-date` 并返回 0。它区分不了这两种情况：
+**根因**：`commit_and_push` 把 `git push` 的返回码 0 直接当成成功。
+而 git 在远端已包含 HEAD 时打印 `Everything up-to-date`，**同样返回 0**。
 
-| 实际情况 | push 返回码 |
-|---|---|
-| 我推上去了 | 0 |
-| 我的提交在 `pull --rebase` 里被丢掉了，没什么可推 | **也是 0** |
+**第一次加固**（不够）：推完回读 `ls-remote`，比对是否等于本地 HEAD。
 
-painting 全量要跑约 30 分钟，期间 `main` 被别的工作推进过，
-push 被拒 → 自动 `pull --rebase` 重试 → 提交丢了 → 日志照样报成功。
+**第二次现场**（2026-10-22，`update-data` run `39725189756`）：日志又是
+`已推送到 main（已回读远端校验）`，但远端仍是上一条提交。原因：
+`git pull --rebase` 一旦把提交丢掉，**HEAD 会被挪到远端位置上**，
+此时 `HEAD == origin/main` 成立 —— SHA 比对看不出任何异常。
 
-**加固**：推完回读远端 ref，比对是否等于本地 HEAD，不等就 `die()`，
-让这一轮变红而不是假装成功。
+所以 SHA 比对天生有盲区：
+
+| 实际情况 | push rc | HEAD == 远端 |
+|---|---|---|
+| 我推上去了 | 0 | 是 |
+| 提交被 rebase 丢掉 | 0 | **也是** |
+
+**第二次加固**：提交后、推送前，先记下每个目标路径的 tree/blob sha；
+推送后回读 `origin/<branch>:<path>` 比对。内容对上才算到了。
 
 ```python
-if proc.returncode == 0 and pushed(branch, cwd):
-    log(f"已推送到 {branch}（已回读远端校验）")
-    return True
-if proc.returncode == 0:
-    warn("推送返回 0，但远端不含本次提交")   # 提交被 rebase 丢掉
+snapshot = {p: git("rev-parse", f"HEAD:{p}") for p in paths}
+...
+if proc.returncode == 0 and landed(cwd, branch, snapshot):
+    log(f"已推送到 {branch}（已回读远端内容校验）")
 ```
 
-**遗留**：这次是 state 丢了、图还在（图是分片各自直传的，不依赖 commit）。
-反过来不成立 —— 若哪天产物依赖 state，同样的静默失败会留下缺口。
+本地用裸仓库复现过两种情形：远端内容已变 → `landed()` 返回 False；
+正常竞争（远端前进 + 本地提交 → rebase → 推送）→ 通，且远端真的有那个文件。
+
+**遗留**：`--paths-from` 模式没有可比对的目录粒度，会退回 SHA 校验（较弱）。
+目前没有任何 workflow 用它，真要启用得补上。
 
 ## 6. 缓存策略：一个必须知道的坑
 
