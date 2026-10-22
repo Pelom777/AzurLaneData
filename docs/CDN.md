@@ -361,7 +361,34 @@ painting 全量约 **2,491 张 / 下载 3.7 GB / 产物 5.6 GB**。托管 runner
 | Actions 分钟 | 6 × 约 22 ≈ 130 分钟 / 次全量（free 额度 2000 分钟/月） |
 
 > 全量重生的代价是一次约 130 分钟的 Actions 配额，别频繁跑；
-> 日常增量走 `update-assets.yml` 的默认参数（`shards=1`）。
+> 日常增量走 `update-assets.yml` 的默认参数（`shards` 留 0 让它自动定）。
+
+## 4.6 两条上传链路：data 归 update-data，图片归 update-assets
+
+R2 桶要能和仓库的 `public/` 对上，前端把 `VITE_CDN` 指过来就能跑：
+
+```text
+public/data/ship.json        →  r2:<bucket>/data/ship.json
+public/painting/x/x.png      →  r2:<bucket>/painting/x/x.png
+public/squareicon/y.png      →  r2:<bucket>/squareicon/y.png
+```
+
+两条链路的**分工是「谁产出谁上传」**，不是按文件大小分的：
+
+| 链路 | 产出方 | 上传步骤 | 缓存头 |
+|---|---|---|---|
+| `data/` | `update-data.yml`（解包 Lua → `build_data.py`） | 「发布 data 到 R2」 | `max-age=300, stale-while-revalidate=60` |
+| 图片 | `update-assets.yml`（`azl_assets.py`） | 各分片的「上传」 | `max-age=86400` |
+
+**为什么数据必须短缓存**：图片路径里没有内容 hash、但内容几个月才变一次；
+数据每天可能变几次，长缓存会让前端在上游更新后仍读到旧值（见 §6）。
+
+上传步骤刻意放在 `commit` **之前**：上传失败就不提交，`version.json` 不前进，
+下一轮自动重试。反过来先提交再上传，会出现「git 说已更新、CDN 还是旧值」
+且没有任何东西会去修的状态。
+
+> 注意 `data/`（仓库根目录）里的 `version.json` / `new-ledger.json` 是**内部账本**，
+> 不上 CDN。前端读的是 `public/data/` 下那份。
 
 ## 5. 增量同步（CI）
 
