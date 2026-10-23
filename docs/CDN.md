@@ -686,6 +686,43 @@ gh workflow run update-assets.yml -f items=spine -f scope=all   # 含未引用�
 
 体量：2,493 个包合计 **396 MB** 下载，产物同量级。
 
+## 4.13 painting json 的 `position` 是谁的坐标（2026-10-23）
+
+**结论：`position` 是 `anchoredPosition`，前端那句 `- size * pivot` 算错了。**
+
+坐标系对照：
+
+| 角色 | 含义 |
+|---|---|
+| Unity `m_AnchoredPosition` | **anchor 点**相对父 anchor 参考点的偏移；实测所有图层的 `anchorMin=anchorMax`，且绝大多数是 `(0.5,0.5)` ⇒ 也就是图层**中心** |
+| `position`（json） | 直接抄的上面这个值 |
+| 前端 `left = W/2 - size*pivot + position` | 把 `position` 当成 **pivot 点**在用 |
+
+两者只在 `pivot = (0.5, 0.5)` 时等价 —— 这就是绝大多数立绘一直没暴露的原因。
+`bisimaiz` 的 `part` 是 `pivot=(0,0.5)`、`size=1500`，差 `750px`，人物主体被横切成两半。
+
+**修法在前端，一行**：
+
+```diff
+- left = baseSize/2 - size*pivot + position
++ left = baseSize/2 - size/2     + position   // 或 - size*anchor
+```
+
+用 mesh 渲染验证过（三版对比）：
+
+| 方案 | bisimaiz | baifeng_2 |
+|---|---|---|
+| 现状 `- size*pivot` | 人物主体中间有横切缝 | 正常 |
+| 改 `- size/2` | **横切缝消失，人物连贯** | 只差 20px，几乎不动 |
+| 导出补 `(pivot-anchor)*size` | 缝也合上 | **人物下移 222px，脚被裁** |
+
+所以导出侧**不要动**（`painting_site._position_of` 已回滚并加了注释），
+也不需要为这个重跑 2,505 张。
+
+> 顺带排除的另一个猜测：`position` 不是 pivot 点，也不是"画布坐标"，
+> 就是 anchor 点偏移。别在导出里加祖先链 —— `bisimaiz` 的 `part` 挂在
+> `bisimaiz_rw` 下，加上父级偏移后 `baifeng_2` 会整体左移 400+px。
+
 ## 5. 增量同步（CI）
 
 ### 5.1 凭据：4 个 secrets
