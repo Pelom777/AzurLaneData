@@ -66,6 +66,7 @@ HASH_KEYS = {
 
 # 每个种类从哪份清单里找 bundle
 CATEGORY_LIST = {
+    'spine': 'az',
     'painting': 'painting',
     'paintingface': 'az',
     'squareicon': 'az',
@@ -101,6 +102,18 @@ USED_SCOPED = {'painting', 'squareicon', 'shipicon', 'equipicon'}
 # 经由 export_faces 产出）。两套布局各自导出过一次，2026-10-22 清掉了
 # 13,799 个扁平文件 / 1.4 GB。留着这个护栏，避免有人手滑又跑一遍。
 OBSOLETE_ITEMS = {'paintingface'}
+
+# Spine 三件套（png + skel + atlas）没有独立目录前缀：包名以 `_skeletondata` 结尾，
+# 散落在 spineitem/（12 个）、iconframe/（1 个）等处。
+SPINE_SUFFIX = '_skeletondata'
+# 特效 / 子弹的 spine 也以 `_skeletondata` 结尾，但没有自己的贴图（共用图集），
+# 属于「半套」，既导不出三件套也不是站点要的东西。
+SPINE_SKIP_PREFIX = 'artresource/'
+# 游戏数据自身撞名的包：`yxt_batait_skeletondata` 里 skel 叫 `yxt_bataiT`，
+# 但 atlas 与贴图都叫 `yxt_bataiB`，与 `yxt_bataib_skeletondata` 的产物完全重叠。
+# 保留 B 那套（atlas 引用的就是 B.png），T 这套跳过并记入 state，
+# 否则每轮都会重试、每轮报一次失败。
+SPINE_DUP_PACKAGES = {'spineitem/yxt_batait_skeletondata'}
 
 UA = {'User-Agent': 'Mozilla/5.0 (compatible; azl-assets/1.0)'}
 
@@ -603,6 +616,67 @@ def export_texture_bundle(bundle: Path, dest_dir: Path,
     return written
 
 
+def export_spine_bundle(bundle: Path, out_root: Path) -> tuple[str, list[Path]] | None:
+    """Spine 包 → `spine/<贴图名>/{<贴图名>.png, .skel, .atlas}`。
+
+    游戏里以 `*_skeletondata` 结尾的包（实测 21 个）就是标准 Spine 三件套：
+    一张 Texture2D + 两个 TextAsset（.skel 二进制、.atlas 文本）。
+
+    **目录名与文件名都取贴图名，不取清单名**：atlas 正文的第一行就是
+    `<贴图名>.png`，而前端是按 `<cdn>/spine/<名字>/<名字>.skel` 拼路径的。
+    清单名（如 `yxt_bataib_skeletondata`）和贴图名（`yxt_bataiB`）大小写可能不同，
+    按清单名建目录会让 atlas 里的引用指空。
+
+    TextAsset 的名字要剥掉 `.txt`：Unity 里存的是导出工具的原始文件名，
+    Spine 侧常写成 `<name>.atlas.txt` / `<name>.skel.txt`，前端要的是 `<name>.atlas`。
+    """
+    import UnityPy
+    from painting_site import save_png
+
+    env = UnityPy.load(str(bundle))
+    tex = None
+    texts: dict[str, object] = {}
+    for obj in env.objects:
+        kind = obj.type.name
+        if kind == 'Texture2D':
+            tex = obj.read()
+        elif kind == 'TextAsset':
+            data = obj.read()
+            raw = (getattr(data, 'm_Name', '') or '').strip()
+            stem = raw[:-4] if raw.lower().endswith('.txt') else raw
+            ext = Path(stem).suffix.lower()
+            if ext in ('.skel', '.atlas'):
+                texts[ext] = data
+
+    if tex is None or len(texts) < 2:
+        warn(f'{bundle.name}: 不是 spine 三件套'
+             f'（贴图 {"有" if tex else "无"}，TextAsset {sorted(texts)}），跳过')
+        return None
+
+    name = (getattr(tex, 'm_Name', '') or '').strip()
+    if not name:
+        warn(f'{bundle.name}: 贴图没有名字，跳过')
+        return None
+
+    out_dir = out_root / name
+    if (out_dir / f'{name}.skel').exists():
+        # 实测有这种包：`yxt_batait_skeletondata` 里 skel 叫 `yxt_bataiT`，
+        # 但 atlas 和贴图都叫 `yxt_bataiB` —— 与另一个包撞名。
+        # 直接写会把前一个覆盖掉，等于静默少一套。宁可报出来。
+        warn(f'{bundle.name}: 贴图名 {name} 与已产出的目录冲突，跳过（需人工确认）')
+        return None
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = [save_png(out_dir / f'{name}.png', to_bgra(tex))]
+    for ext, data in texts.items():
+        raw = data.m_Script
+        blob = (raw.encode('utf-8', 'surrogateescape')
+                if isinstance(raw, str) else bytes(raw))
+        target = out_dir / f'{name}{ext}'
+        target.write_bytes(blob)
+        written.append(target)
+    return name, written
+
+
 def export_painting(bundle: Path, cache: Path, path_map: dict, cdn: str,
                     public: Path, name: str, face_bundle: Path | None = None,
                     out_dir: str | None = None) -> dict:
@@ -772,8 +846,19 @@ def main() -> int:
         mapping = get_list(CATEGORY_LIST.get(item, 'az'))
         if not mapping:
             continue
-        prefix = SOURCE_PREFIX.get(item, item)
-        targets = {p: v for p, v in mapping.items() if p.startswith(prefix + '/')}
+        if item == 'spine':
+            # spine 没有 `spine/` 这个目录前缀：三件套散在 `spineitem/`、
+            # `iconframe/` 下，统一特征是包名以 `_skeletondata` 结尾。
+            # `artresource/` 要排除：那是特效和子弹的 spine（8 个），
+            # 只有 skel + atlas、贴图在共享图集里，导出来是半套，前端也用不到。
+            prefix = ''
+            targets = {p: v for p, v in mapping.items()
+                       if p.endswith(SPINE_SUFFIX)
+                       and not p.startswith(SPINE_SKIP_PREFIX)
+                       and p not in SPINE_DUP_PACKAGES}
+        else:
+            prefix = SOURCE_PREFIX.get(item, item)
+            targets = {p: v for p, v in mapping.items() if p.startswith(prefix + '/')}
         # 判断 `_ex` 变体是否成立：<name>_ex 的 `<name>` 必须本身是个立绘。
         # 这样 `yan_n_ex` 会归到 `yan_n`（清单里确实有 yan_n），而不是 `yan_n` 之外的野路径。
         base_names = ({p.split('/', 1)[1].lower() for p in mapping
@@ -846,6 +931,12 @@ def main() -> int:
                 marker_file = (public / 'painting' / scope_name / f'{name}.json'
                                if is_ex else
                                public / 'painting' / name / f'{name}.json')
+            elif item == 'spine':
+                # 目录名取自包内的贴图名（`yxt_bataiB`），而清单名是小写的
+                # `yxt_bataib_skeletondata` —— 下载前推不出真实路径，所以不设 marker。
+                # 代价：21 个包、合计几 MB，每轮最多重下重传一次。想省这点带宽，
+                # 得先让远端清单能被反查到贴图名，不值当。
+                marker_file = None
             else:
                 marker_file = public / item / f'{name}.png'
 
@@ -862,7 +953,9 @@ def main() -> int:
                     report['skipped'] += 1
                 continue
 
-            if prev.get(key) == info['md5'] and marker_file.exists() and not args.force:
+            if (prev.get(key) == info['md5']
+                    and (marker_file is None or marker_file.exists())
+                    and not args.force):
                 report['skipped'] += 1
                 continue
             # 播种：产物已经在磁盘上，但 state 里没有这条记录 —— 说明这份资源是别的
@@ -897,7 +990,16 @@ def main() -> int:
                             if not dep_file.exists():
                                 download_bundle(cdn, dep_info['md5'], dep_file,
                                                 dep_info['size'])
-                if item == 'painting':
+                if item == 'spine':
+                    spine = export_spine_bundle(cached, public / 'spine')
+                    if spine is None:
+                        report['failed'] += 1
+                        failures.append({'path': path, 'item': item,
+                                         'size': info['size'],
+                                         'reason': '导出跳过（原因见上面那条 warning）'})
+                        continue
+                    _spine_name, files = spine
+                elif item == 'painting':
                     face_bundle = None
                     if face_info:
                         face_bundle = cache / face_path
