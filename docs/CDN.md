@@ -640,47 +640,51 @@ banjiu  feiniao  gaoxiong_6  xishao  xuebugui  xuequan  yan  zi_shanluan
 
 ## 4.12 每船小人的 Spine 三件套（2026-10-23）
 
-站点要的 spine 不是 `*_skeletondata`（那是演习台、图标动效，13 个小件），
-而是**每船配套的 Q 版小人**，游戏里在：
+站点要的是**每个角色每个皮肤配套的 Q 版小人**，游戏里在：
 
 ```text
-spinepainting/<皮肤名>_res
+char/<皮肤名>
 ```
 
-同一前缀下还有 239 个不带 `_res` 的包，那是场景 prefab（只有
-`GameObject` / `SkeletonGraphic` / `CanvasRenderer`，没有 Texture2D 和 TextAsset），
-真正的图与骨架全在 `_res` 里。
+实测 3,281 个包，每个包里正好三件套：`Texture2D` 一张 + `.skel` + `.atlas`。
+按 `public/data` 的引用集过滤后是 **2,493 个**（未被引用 725 个），
+与立绘目录数（2,505）同量级 —— 这就是「一皮肤一小人」的那批。
 
-产物布局（与旧前端仓库 `public/spine` 一致）：
+**三个长得像、但都不是的邻居**（都踩过）：
+
+| 前缀 | 数量 | 实际是什么 |
+|---|---|---|
+| `spinepainting/<名>_res` | 224 | 动态皮肤（多页图集 4096²，一个皮肤几百 MB 级） |
+| `spinepainting/<名>` | 239 | 动态皮肤的场景 prefab，包里没有图和数据 |
+| `shipmodels/<名>` | 2,564 | 战斗界面里的 Q 版小头像（144×152），不是 spine |
+
+产物布局（与旧前端 `public/spine` 一致）：
 
 ```text
-spine/<皮肤名>/<页名>.png      ← 一页图集一张，实测最多 5 张 4096²
+spine/<皮肤名>/<页名>.png      ← 一页图集一张
 spine/<皮肤名>/<皮肤名>.skel
 spine/<皮肤名>/<皮肤名>.atlas
 ```
 
 三个容易踩的点：
 
-1. **目录名与 skel/atlas 名用去掉 `_res` 的包名**（`adaerbote_4_res` → `adaerbote_4`），
-   这就是站点拼路径用的皮肤名。
-2. **png 用各自的贴图名**。多页图集里 atlas 正文写的页名就是它
-   （`aerbien_4.png` / `aerbien_42.png`），改名会让 atlas 指向不存在的文件。
+1. **目录名与 skel/atlas 名用包名**（`char/2b_2` → `spine/2b_2/2b_2.*`），
+   小写，和 painting 名对齐。
+2. **png 用各自的贴图名，不要跟着目录名走**：`char/2b` 的贴图叫 `2B`
+   （大写 B），atlas 正文写的也是 `2B.png`。按目录名写成 `2b.png`，
+   atlas 在大小写敏感的 CDN 上就会指向空文件。
 3. **TextAsset 名要剥 `.txt`**。Unity 存的是导出工具的原始文件名，
-   Spine 侧常写成 `<name>.atlas.txt`，前端要的是 `<name>.atlas`（有则剥、无则原样）。
-
-现状（CN 9.7.416）：`_res` 包 **224 个**，剔除 3 个 `_asmr` 后 **221 套可用**；
-下载量合计 **2.45 GB**（中位数 9.9 MB，最大 39.8 MB），产物量级与下载相当。
-
-> 与旧仓库的差距：旧前端 `public/spine` 有 2,121 个目录 / 6,363 个文件，
-> 而当前版本游戏只有 224 个 `_res`。差的是历史皮肤 —— 游戏侧已经不再提供，
-> 只能从旧仓库补，不能靠解包追平。
+   Spine 侧常写成 `<name>.atlas.txt`（有则剥、无则原样）。
 
 跑法（spine 不在默认 items 里，因为它的 marker 路径要等下载后才知道，
 加进默认会让每轮都重做一次）：
 
 ```bash
-gh workflow run update-assets.yml -f items=spine -f scope=all
+gh workflow run update-assets.yml -f items=spine        # scope 默认 used
+gh workflow run update-assets.yml -f items=spine -f scope=all   # 含未引用的
 ```
+
+体量：2,493 个包合计 **396 MB** 下载，产物同量级。
 
 ## 5. 增量同步（CI）
 
@@ -917,7 +921,7 @@ r2.dev 因为没有 Cache 规则，实际上只看对象上的 `Cache-Control` �
 | CI 空工作区导致全量重跑 | ✅ 用 `scripts/mark_remote.py` 补 marker 解决，见 §5.2 |
 | `rclone lsf` 缺 `--recursive` 使上面那条失效 | ✅ 已修（2026-10-21 实测发现），见 §5.2 |
 | R2 受限 token 触发 `CreateBucket` 403 | ✅ 已加 `--s3-no-check-bucket` |
-| `spine` 无法自动 | ✅ 每船小人（`spinepainting/*_res`）已可导出，见 §4.12；⚠️ 当前版本只有 221 套，历史皮肤仍缺（旧仓库 2,121 套） |
+| `spine` 无法自动 | ✅ 每船小人（`char/*`，2,493 套）已可导出，见 §4.12 |
 | `HANDOFF.md` 写着"已支持 spine" | ⚠️ 表述有误，实际不支持 |
 | 单 job 跑不下 painting 全量 | ✅ crc32 分片并行，见 §4.5 |
 | 每个分片从空 state 起手 ⇒ 每轮全量 | ✅ 改为继承基线 state + 差分合并，见 §4.5 |

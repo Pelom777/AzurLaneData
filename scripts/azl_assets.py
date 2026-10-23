@@ -94,7 +94,7 @@ SOURCE_PREFIX = {
 # 这些种类的产出名以 public/data 的引用集为准（见 load_used_names）。
 # 仓库现有图标目录只收录站点真正用到的资源：shipicon 2157 个文件 100% 落在引用集内，
 # 而游戏清单有 2671 个 —— 全量导出会多出几百个没人引用的文件。
-USED_SCOPED = {'painting', 'squareicon', 'shipicon', 'equipicon'}
+USED_SCOPED = {'painting', 'squareicon', 'shipicon', 'equipicon', 'spine'}
 
 # 不再作为独立类别导出的条目。
 # `paintingface` 单独导出会写成扁平文件 paintingface/<name>_<i>.png，
@@ -105,11 +105,12 @@ OBSOLETE_ITEMS = {'paintingface'}
 
 # Spine 三件套（png + skel + atlas）没有独立目录前缀：包名以 `_skeletondata` 结尾，
 # 散落在 spineitem/（12 个）、iconframe/（1 个）等处。
-# 站点要的是「每船一套小人」：游戏里在 `spinepainting/<皮肤名>_res`。
-# 同一前缀下还有不带 `_res` 的 239 个包，那是场景 prefab（包里只有
-# GameObject/SkeletonGraphic，贴图在依赖 cab 里），不是三件套。
-SPINE_PREFIX = 'spinepainting/'
-SPINE_SUFFIX = '_res'
+# 站点要的是「每个角色每个皮肤配套的小人」：游戏里在 `char/<皮肤名>`，
+# 包里正好三件套（Texture2D + .skel + .atlas），共 3,281 个，与立绘数量同量级。
+# 两个容易认错的邻居：
+#   `spinepainting/<名>_res` 是动态皮肤（只有 224 套）
+#   `shipmodels/<名>`        是战斗界面的 Q 版小头像（144×152，不是 spine）
+SPINE_PREFIX = 'char/'
 
 UA = {'User-Agent': 'Mozilla/5.0 (compatible; azl-assets/1.0)'}
 
@@ -837,7 +838,7 @@ def main() -> int:
         if item == 'spine':
             prefix = SPINE_PREFIX
             targets = {p: v for p, v in mapping.items()
-                       if p.startswith(SPINE_PREFIX) and p.endswith(SPINE_SUFFIX)}
+                       if p.startswith(SPINE_PREFIX)}
         else:
             prefix = SOURCE_PREFIX.get(item, item)
             targets = {p: v for p, v in mapping.items() if p.startswith(prefix + '/')}
@@ -867,8 +868,6 @@ def main() -> int:
             if item == 'painting' and path.endswith(('_tex', '-mesh')):
                 continue
             name = path.split('/', 1)[1].lower()
-            if item == 'spine' and name.endswith(SPINE_SUFFIX):
-                name = name[:-len(SPINE_SUFFIX)]
             # 分片：crc32 而不是 hash()，后者按进程随机化，换一次进程分片就变了
             if shard_n > 1 and zlib.crc32(name.encode()) % shard_n != shard_i:
                 report['other_shard'] += 1
