@@ -731,6 +731,9 @@ def main() -> int:
     ap.add_argument('--items', nargs='*', default=None,
                     help='要处理的资源类别，默认 painting + 两种图标')
     ap.add_argument('--limit', type=int, default=0, help='每类最多处理几个（调试用）')
+    ap.add_argument('--only', default='',
+                    help='只处理这些名字（逗号分隔，不带目录前缀）。'
+                         '配合 --force 用来单独重跑某个资源，避免全量重传')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--force', action='store_true', help='忽略增量状态，全部重跑')
     ap.add_argument('--report-files', default='',
@@ -842,6 +845,10 @@ def main() -> int:
         else:
             prefix = SOURCE_PREFIX.get(item, item)
             targets = {p: v for p, v in mapping.items() if p.startswith(prefix + '/')}
+        if args.only:
+            allow = {n.strip().lower() for n in args.only.split(',') if n.strip()}
+            targets = {p: v for p, v in targets.items()
+                       if p.split('/', 1)[1].lower() in allow}
         # 判断 `_ex` 变体是否成立：<name>_ex 的 `<name>` 必须本身是个立绘。
         # 这样 `yan_n_ex` 会归到 `yan_n`（清单里确实有 yan_n），而不是 `yan_n` 之外的野路径。
         base_names = ({p.split('/', 1)[1].lower() for p in mapping

@@ -47,6 +47,10 @@ on:
         description: "资源类别（空格分隔）"
         default: "painting squareicon shipicon equipicon iconframe"
         type: string
+      only:
+        description: "只处理这些名字（逗号分隔，不带目录前缀）；配合 force 单独重跑某个资源"
+        default: ""
+        type: string
       shards:
         description: "分片数：0=按待处理量自动决定（默认）；1..16=强制指定"
         default: "0"
@@ -136,7 +140,7 @@ jobs:
         run: |
           ARGS="--plan --server $SERVER --public public --cache .azl/bundles \
                 --state .azl/assets-state.json --scope ${{ inputs.scope }} \
-                --items ${{ inputs.items }}"
+                --items ${{ inputs.items }} --only ${{ inputs.only }}"
           # force 意味着"全部重做"，此时盘点也不该走 state 缓存
           if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
           python scripts/azl_assets.py $ARGS
@@ -278,6 +282,7 @@ jobs:
           ARGS="--server $SERVER --public public --cache .azl/bundles \
                 --state .azl/state-$SHARD.json --scope ${{ inputs.scope }} \
                 --items ${{ inputs.items }} --shard $SHARD/$N \
+                --only ${{ inputs.only }} \
                 --report-files .azl/written-$SHARD.list \
                 --report-failures .azl/failed-$SHARD.json"
           if [ "${{ inputs.limit }}" != "0" ]; then ARGS="$ARGS --limit ${{ inputs.limit }}"; fi
