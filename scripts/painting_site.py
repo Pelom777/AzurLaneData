@@ -209,28 +209,19 @@ class PaintingExporter:
         return self.layers
 
     def _position_of(self, layer) -> list:
-        """图层 pivot 点相对画布中心的偏移（前端拿它当锚点位置用）。
+        """图层 anchor 点相对画布中心的偏移，与旧前端仓库的 json 逐字段一致。
 
-        `m_AnchoredPosition` 定位的是 **anchor 点**，而前端
-        `baseSize/2 - size*pivot + position` 需要的是 **pivot 点**，两者差
-        `(pivot - anchorMin) * size`。bisimaiz 的 part 就是最极端的例子：
-        pivot=(0,0.5)、size=1500，这一项正好是 750px —— 不补，两块部件会左右岔开。
-
-        **不做祖先链累加**：试过把父级的 anchoredPosition 也加进来，
-        bisimaiz 看着还行，但 baifeng_2 的人物会整体左移 400+px（父链上那个
-        节点是画布容器，不是图层），肉眼一看就是错的。见 2026-10-23 的对比渲染。
+        **不要在这里补 `(pivot - anchorMin) * size`**：试过，bisimaiz 中间那道
+        横切缝确实合上了，但 baifeng_2 会整体下移 222px（人物脚被裁）。
+        2026-10-23 用 mesh 渲染做过三版对比（原值 / 加 pivot / 再加祖先链），
+        结论是这个坐标系里 `position` 就该是 anchoredPosition，
+        真正算错的是前端那句 `- size * pivot`（它把 position 当成了 pivot 点），
+        详见 docs/CDN.md §4.13。
         """
         # 基底层自身 anchor 恒为 (0,0)，真正的位置来自 mainFullScreen
         if layer['name'].lower() == self.base_name and self.frame is not None:
             return _vec2(self.frame.m_AnchoredPosition)
-        trans = layer['trans']
-        pos = _vec2(trans.m_AnchoredPosition)
-        size = _vec2(trans.m_SizeDelta)
-        pivot = _vec2(trans.m_Pivot)
-        amin = _vec2(trans.m_AnchorMin)
-        pos[0] += (pivot[0] - amin[0]) * size[0]
-        pos[1] += (pivot[1] - amin[1]) * size[1]
-        return pos
+        return _vec2(layer['trans'].m_AnchoredPosition)
 
     def _one_layer(self, layer, used: dict, dest: Path):
         mono = layer['mono']
