@@ -99,12 +99,12 @@ OPTION = {
         #        114 = danmachi、115 = dal、117 = nierautomata）
         #   2) key→作品名：`CN/sharecfg/equip_skin_theme_template.lua`
         #      里同一作品的装备皮肤主题名，原文照抄（只去掉尾随空格）
-        #   · 113/114 这两个主题名给的是「炼金工房II」和「danmachi」，
-        #     不是可展示的名字，所以按同系列的既有叫法对齐：
-        #     109 是 `Atelier Ryza` → 113 用 `Atelier Yumia`；114 用官方缩写 `DanMachi`。
-        #     这两条是推断，不是照抄，改之前先确认。
+        #   · 113 的主题名给的是「炼金工房II」，不可展示，按 109 `Atelier Ryza`
+        #     的系列叫法对齐成 `Atelier Yumia`（这条仍是推断，改之前先确认）；
+        #   · 114 / 117 按用户 2026-10-23 的更正：小写 `danmachi`、
+        #     空格分隔的 `NieR Automata`（都不带冒号）。
         [111, 'To LOVE-Ru'], [112, 'BLACK★ROCK SHOOTER'], [113, 'Atelier Yumia'],
-        [114, 'DanMachi'], [115, 'Date A Live'], [117, 'NieR:Automata'],
+        [114, 'danmachi'], [115, 'Date A Live'], [117, 'NieR Automata'],
     ],
 }
 
