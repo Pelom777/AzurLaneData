@@ -93,10 +93,18 @@ OPTION = {
         [97, 'META'], [98, '其他'], [101, '海王星'], [102, '哔哩哔哩'], [103, '传颂之物'],
         [104, 'KizunaAI'], [105, 'hololive'], [106, '维纳斯假期'], [107, '偶像大师'],
         [108, 'SSSS'], [109, 'Atelier Ryza'], [110, '闪乱神乐'],
-        # 以下六个是 2024 之后的新联动，按 wiki 的叫法写（109 是历史遗留的英文名，
-        # 与这里的中文名风格不一致，要统一的话单独提一次，别顺手改）。
-        [111, '出包王女'], [112, '黑岩射手'], [113, '优米雅的炼金工房'],
-        [114, '地城邂逅'], [115, '约会大作战'], [117, 'NieRAutomata'],
+        # 以下六个联动的名字**不是译名**，是游戏数据里的作品原名。依据两条：
+        #   1) 编号→key：`CN/model/const/nation.lua` 的 Nation2Name
+        #      （12 = jinghuanlianmeng、111 = tolove、112 = brs、113 = yumia、
+        #        114 = danmachi、115 = dal、117 = nierautomata）
+        #   2) key→作品名：`CN/sharecfg/equip_skin_theme_template.lua`
+        #      里同一作品的装备皮肤主题名，原文照抄（只去掉尾随空格）
+        #   · 113/114 这两个主题名给的是「炼金工房II」和「danmachi」，
+        #     不是可展示的名字，所以按同系列的既有叫法对齐：
+        #     109 是 `Atelier Ryza` → 113 用 `Atelier Yumia`；114 用官方缩写 `DanMachi`。
+        #     这两条是推断，不是照抄，改之前先确认。
+        [111, 'To LOVE-Ru'], [112, 'BLACK★ROCK SHOOTER'], [113, 'Atelier Yumia'],
+        [114, 'DanMachi'], [115, 'Date A Live'], [117, 'NieR:Automata'],
     ],
 }
 
