@@ -211,13 +211,14 @@ class PaintingExporter:
     def _position_of(self, layer) -> list:
         """图层 pivot 点相对画布中心的偏移（前端拿它当锚点位置用）。
 
-        不能直接取 `m_AnchoredPosition`：那是「anchor 点相对父 anchor 参考点」
-        的偏移，差两层东西 ——
-          1. `(pivot - anchorMin) * size`：anchoredPosition 定位的是 anchor 点，
-             而前端画图对齐的是 pivot 点；
-          2. 祖先链：图层可能挂在非根节点下（bisimaiz 的 part 挂在
-             `bisimaiz_rw` 下面，中间还隔一个普通 Transform），父级的
-             `anchoredPosition` 必须累加进来，否则整个部件会跑到画布中间附近。
+        `m_AnchoredPosition` 定位的是 **anchor 点**，而前端
+        `baseSize/2 - size*pivot + position` 需要的是 **pivot 点**，两者差
+        `(pivot - anchorMin) * size`。bisimaiz 的 part 就是最极端的例子：
+        pivot=(0,0.5)、size=1500，这一项正好是 750px —— 不补，两块部件会左右岔开。
+
+        **不做祖先链累加**：试过把父级的 anchoredPosition 也加进来，
+        bisimaiz 看着还行，但 baifeng_2 的人物会整体左移 400+px（父链上那个
+        节点是画布容器，不是图层），肉眼一看就是错的。见 2026-10-23 的对比渲染。
         """
         # 基底层自身 anchor 恒为 (0,0)，真正的位置来自 mainFullScreen
         if layer['name'].lower() == self.base_name and self.frame is not None:
@@ -229,23 +230,6 @@ class PaintingExporter:
         amin = _vec2(trans.m_AnchorMin)
         pos[0] += (pivot[0] - amin[0]) * size[0]
         pos[1] += (pivot[1] - amin[1]) * size[1]
-        cur = trans
-        for _ in range(8):                       # 层级很浅，8 层足够且防环
-            father = getattr(cur, 'm_Father', None)
-            if father is None or getattr(father, 'path_id', 0) == 0:
-                break                            # 到根
-            try:
-                fa = father.read()
-            except Exception:
-                break
-            if getattr(fa, 'm_AnchoredPosition', None) is None:
-                cur = fa                          # 普通 Transform 没有锚点，跳过它
-                continue
-            fsize = _vec2(fa.m_SizeDelta)
-            famin = _vec2(fa.m_AnchorMin)
-            pos[0] += fa.m_AnchoredPosition.x + (famin[0] - 0.5) * fsize[0]
-            pos[1] += fa.m_AnchoredPosition.y + (famin[1] - 0.5) * fsize[1]
-            cur = fa
         return pos
 
     def _one_layer(self, layer, used: dict, dest: Path):
