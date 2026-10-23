@@ -723,6 +723,24 @@ gh workflow run update-assets.yml -f items=spine -f scope=all   # 含未引用�
 > 就是 anchor 点偏移。别在导出里加祖先链 —— `bisimaiz` 的 `part` 挂在
 > `bisimaiz_rw` 下，加上父级偏移后 `baifeng_2` 会整体左移 400+px。
 
+### 4.13 的更正（2026-10-23 20:30）
+
+上面"导出侧不要动"的结论只对了一半。真正错的地方不是 `position` 的语义，而是：
+
+**中间层没有产出时，它的变换被丢了。**
+
+`bisimaiz` 的 `bisimaiz_rw`（偏移 `458, -27`）贴图不在依赖里，`_one_layer` 返回 None
+被跳过 —— 它没进 json，但 `part` / `part_2` 正是挂在它下面（中间还隔一个普通
+`Transform`）。于是 `part` 按"挂在根下"算，整体左移 458，人物与 face 错开。
+**游戏里 face 的位置一直是对的，歪的是人物。**
+
+修法（`painting_site._walk`）：父链的 `m_AnchoredPosition` 逐层累加，
+`_position_of` 优先用累加值。**不能乘父级 scale** —— `anchoredPosition` 是逻辑坐标。
+
+影响面：2921 张立绘里只有 `bisimaiz` 一张属于这种结构（有 `part` 但缺 `*_rw`），
+其余用 `aersasi` 逐字段核对过，**0 差异**。重跑用
+`-f items=painting -f only=bisimaiz -f force=true`。
+
 ## 5. 增量同步（CI）
 
 ### 5.1 凭据：4 个 secrets
