@@ -659,7 +659,7 @@ jobs:
         run: |
           for n in ${{ inputs.prune }}; do
             code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
-              "https://pub-85b4b8af407244bc8f1502127fc530c3.r2.dev/painting/$n/$n.json")
+              "https://pub-85b4b8af407244bc8f1502127fc530c3.r2.dev/${{ inputs.prune_prefix }}/$n/$n.atlas")
             echo "$n → HTTP $code（期望 404）"
           done
 

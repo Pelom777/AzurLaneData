@@ -119,13 +119,15 @@ def main() -> int:
     if args.apply and not args.bucket:
         die('--apply 必须配 --bucket（防手滑时把前缀拼到错地方）')
 
-    names = [n.strip().lower() for n in args.names if n.strip()]
+    # 不做 lower()：R2 的 key 大小写敏感，`spine/yxt_bataiB` 和
+    # `spine/yxt_bataib` 是两个前缀。引用集那边比较时再转小写。
+    names = [n.strip() for n in args.names if n.strip()]
     bad = [n for n in names if not SAFE_NAME_RE.match(n)]
     if bad:
         die(f'名字不合法（只允许 [a-z0-9_]）：{bad}')
 
     used = load_used_names(Path(args.data))
-    blocked = sorted(n for n in names if n in used)
+    blocked = sorted(n for n in names if n.lower() in used)
     if blocked:
         die(f'这些名字还在 data 引用集里，拒绝删：{blocked}'
             '（要先在数据侧剔除，再回来清资源）')
