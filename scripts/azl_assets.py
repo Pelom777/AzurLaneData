@@ -105,15 +105,11 @@ OBSOLETE_ITEMS = {'paintingface'}
 
 # Spine 三件套（png + skel + atlas）没有独立目录前缀：包名以 `_skeletondata` 结尾，
 # 散落在 spineitem/（12 个）、iconframe/（1 个）等处。
-SPINE_SUFFIX = '_skeletondata'
-# 特效 / 子弹的 spine 也以 `_skeletondata` 结尾，但没有自己的贴图（共用图集），
-# 属于「半套」，既导不出三件套也不是站点要的东西。
-SPINE_SKIP_PREFIX = 'artresource/'
-# 游戏数据自身撞名的包：`yxt_batait_skeletondata` 里 skel 叫 `yxt_bataiT`，
-# 但 atlas 与贴图都叫 `yxt_bataiB`，与 `yxt_bataib_skeletondata` 的产物完全重叠。
-# 保留 B 那套（atlas 引用的就是 B.png），T 这套跳过并记入 state，
-# 否则每轮都会重试、每轮报一次失败。
-SPINE_DUP_PACKAGES = {'spineitem/yxt_batait_skeletondata'}
+# 站点要的是「每船一套小人」：游戏里在 `spinepainting/<皮肤名>_res`。
+# 同一前缀下还有不带 `_res` 的 239 个包，那是场景 prefab（包里只有
+# GameObject/SkeletonGraphic，贴图在依赖 cab 里），不是三件套。
+SPINE_PREFIX = 'spinepainting/'
+SPINE_SUFFIX = '_res'
 
 UA = {'User-Agent': 'Mozilla/5.0 (compatible; azl-assets/1.0)'}
 
@@ -616,30 +612,30 @@ def export_texture_bundle(bundle: Path, dest_dir: Path,
     return written
 
 
-def export_spine_bundle(bundle: Path, out_root: Path) -> tuple[str, list[Path]] | None:
-    """Spine 包 → `spine/<贴图名>/{<贴图名>.png, .skel, .atlas}`。
+def export_spine_bundle(bundle: Path, out_root: Path,
+                        name: str) -> tuple[str, list[Path]] | None:
+    """Spine 小人包 → `spine/<name>/{<页>.png..., <name>.skel, <name>.atlas}`。
 
-    游戏里以 `*_skeletondata` 结尾的包（实测 21 个）就是标准 Spine 三件套：
-    一张 Texture2D + 两个 TextAsset（.skel 二进制、.atlas 文本）。
+    游戏里每船一套的小人在 `spinepainting/<皮肤名>_res`，包里是
+    若干 Texture2D（一页图集一张，实测最多 5 张 4096²）+ 两个 TextAsset
+    （`.skel` 二进制、`.atlas` 文本）。
 
-    **目录名与文件名都取贴图名，不取清单名**：atlas 正文的第一行就是
-    `<贴图名>.png`，而前端是按 `<cdn>/spine/<名字>/<名字>.skel` 拼路径的。
-    清单名（如 `yxt_bataib_skeletondata`）和贴图名（`yxt_bataiB`）大小写可能不同，
-    按清单名建目录会让 atlas 里的引用指空。
-
-    TextAsset 的名字要剥掉 `.txt`：Unity 里存的是导出工具的原始文件名，
-    Spine 侧常写成 `<name>.atlas.txt` / `<name>.skel.txt`，前端要的是 `<name>.atlas`。
+    命名规则：
+      · 目录名与 skel/atlas 名用**去掉 `_res` 的包名**（就是站点认的皮肤名）；
+      · png 用**各自的贴图名**——多页图集里 atlas 正文写的页名就是它
+        （`feiteliedadi_5.png` / `feiteliedadi_52.png` …），改了就对不上。
+      · TextAsset 名剥掉 `.txt`（Unity 存的是导出工具的原始文件名）。
     """
     import UnityPy
     from painting_site import save_png
 
     env = UnityPy.load(str(bundle))
-    tex = None
+    texs = []
     texts: dict[str, object] = {}
     for obj in env.objects:
         kind = obj.type.name
         if kind == 'Texture2D':
-            tex = obj.read()
+            texs.append(obj.read())
         elif kind == 'TextAsset':
             data = obj.read()
             raw = (getattr(data, 'm_Name', '') or '').strip()
@@ -648,25 +644,17 @@ def export_spine_bundle(bundle: Path, out_root: Path) -> tuple[str, list[Path]] 
             if ext in ('.skel', '.atlas'):
                 texts[ext] = data
 
-    if tex is None or len(texts) < 2:
+    if not texs or len(texts) < 2:
         warn(f'{bundle.name}: 不是 spine 三件套'
-             f'（贴图 {"有" if tex else "无"}，TextAsset {sorted(texts)}），跳过')
-        return None
-
-    name = (getattr(tex, 'm_Name', '') or '').strip()
-    if not name:
-        warn(f'{bundle.name}: 贴图没有名字，跳过')
+             f'（贴图 {len(texs)} 张，TextAsset {sorted(texts)}），跳过')
         return None
 
     out_dir = out_root / name
-    if (out_dir / f'{name}.skel').exists():
-        # 实测有这种包：`yxt_batait_skeletondata` 里 skel 叫 `yxt_bataiT`，
-        # 但 atlas 和贴图都叫 `yxt_bataiB` —— 与另一个包撞名。
-        # 直接写会把前一个覆盖掉，等于静默少一套。宁可报出来。
-        warn(f'{bundle.name}: 贴图名 {name} 与已产出的目录冲突，跳过（需人工确认）')
-        return None
     out_dir.mkdir(parents=True, exist_ok=True)
-    written: list[Path] = [save_png(out_dir / f'{name}.png', to_bgra(tex))]
+    written: list[Path] = []
+    for tex in texs:
+        page = (getattr(tex, 'm_Name', '') or '').strip() or name
+        written.append(save_png(out_dir / f'{page}.png', to_bgra(tex)))
     for ext, data in texts.items():
         raw = data.m_Script
         blob = (raw.encode('utf-8', 'surrogateescape')
@@ -847,15 +835,9 @@ def main() -> int:
         if not mapping:
             continue
         if item == 'spine':
-            # spine 没有 `spine/` 这个目录前缀：三件套散在 `spineitem/`、
-            # `iconframe/` 下，统一特征是包名以 `_skeletondata` 结尾。
-            # `artresource/` 要排除：那是特效和子弹的 spine（8 个），
-            # 只有 skel + atlas、贴图在共享图集里，导出来是半套，前端也用不到。
-            prefix = ''
+            prefix = SPINE_PREFIX
             targets = {p: v for p, v in mapping.items()
-                       if p.endswith(SPINE_SUFFIX)
-                       and not p.startswith(SPINE_SKIP_PREFIX)
-                       and p not in SPINE_DUP_PACKAGES}
+                       if p.startswith(SPINE_PREFIX) and p.endswith(SPINE_SUFFIX)}
         else:
             prefix = SOURCE_PREFIX.get(item, item)
             targets = {p: v for p, v in mapping.items() if p.startswith(prefix + '/')}
@@ -885,6 +867,8 @@ def main() -> int:
             if item == 'painting' and path.endswith(('_tex', '-mesh')):
                 continue
             name = path.split('/', 1)[1].lower()
+            if item == 'spine' and name.endswith(SPINE_SUFFIX):
+                name = name[:-len(SPINE_SUFFIX)]
             # 分片：crc32 而不是 hash()，后者按进程随机化，换一次进程分片就变了
             if shard_n > 1 and zlib.crc32(name.encode()) % shard_n != shard_i:
                 report['other_shard'] += 1
@@ -910,7 +894,7 @@ def main() -> int:
             # `_asmr` 皮肤（`hu_2_asmr` …）：立绘内容就是本体那张，只是挂了语音，
             # 收录只会让前端列出两条同名皮肤。2026-10-23 起数据侧一并剔除，
             # 所以这里也不会被引用集命中；放在引用集判断之前是为了防 `--scope all`。
-            if item == 'painting' and is_asmr(name):
+            if item in ('painting', 'spine') and is_asmr(name):
                 report['asmr'] += 1
                 if scoped and name in used:
                     warn(f'{path} 是 _asmr 皮肤但被 data 引用了 —— 跳过会缺图，需要人工确认')
@@ -991,7 +975,7 @@ def main() -> int:
                                 download_bundle(cdn, dep_info['md5'], dep_file,
                                                 dep_info['size'])
                 if item == 'spine':
-                    spine = export_spine_bundle(cached, public / 'spine')
+                    spine = export_spine_bundle(cached, public / 'spine', name)
                     if spine is None:
                         report['failed'] += 1
                         failures.append({'path': path, 'item': item,
