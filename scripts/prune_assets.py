@@ -38,7 +38,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import die, log, set_output, warn  # noqa: E402
 
-SAFE_NAME_RE = re.compile(r'^[a-z0-9_]+$')
+# 允许大写：spine 的目录名是贴图名（`yxt_bataiB`），大小写有意义。
+SAFE_NAME_RE = re.compile(r'^[A-Za-z0-9_]+$')
 
 
 def rclone(args: list[str]) -> subprocess.CompletedProcess:
@@ -108,7 +109,11 @@ def main() -> int:
     ap.add_argument('--data', default='public/data', help='引用集目录')
     ap.add_argument('--apply', action='store_true', help='真的删（不传只列）')
     ap.add_argument('--prefix', default='painting',
-                    help='类别目录，默认 painting（表情等由它顺带产出，不单独清理）')
+                    help='R2 上的类别目录，默认 painting')
+    ap.add_argument('--state-prefix', default='',
+                    help='台账 key 里的路径前缀，默认与 --prefix 相同。'
+                         'spine 要传 char：它的 key 是 `spine:char/<名>:<md5>`，'
+                         '而对象在 R2 的 spine/ 下，两者不同名')
     args = ap.parse_args()
 
     if args.apply and not args.bucket:
@@ -156,9 +161,12 @@ def main() -> int:
         else:
             log(f'{prefix}：没给 --bucket，只做台账清理')
 
-        # 台账：key 形如 `painting:painting/<name>:<face_md5>`，按前缀删
+        # 台账：key 形如 `painting:painting/<name>:<face_md5>`。
+        # 用子串 `:<state_prefix>/<name>:` 匹配，不写死类别名 ——
+        # spine 的 key 是 `spine:char/<名>:<md5>`，与 R2 目录（spine/）不同名。
+        sp_ = args.state_prefix or args.prefix
         for srv, items in (state.get('items') or {}).items():
-            dead = [k for k in items if k.startswith(f'{args.prefix}:{args.prefix}/{name}:')]
+            dead = [k for k in items if f':{sp_}/{name}:' in k]
             for k in dead:
                 del items[k]
                 removed_keys += 1

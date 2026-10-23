@@ -77,7 +77,15 @@ on:
         default: false
         type: boolean
       prune:
-        description: "一次性：删掉指定的立绘目录（空格分隔的名字，不含 painting/ 前缀）"
+        description: "一次性：删掉指定的资源目录（空格分隔的名字，不带类别前缀）"
+        default: ""
+        type: string
+      prune_prefix:
+        description: "prune 的 R2 类别目录（painting / spine …）"
+        default: "painting"
+        type: string
+      prune_state_prefix:
+        description: "prune 在台账里的路径前缀；留空则同 prune_prefix（spine 要填 char）"
         default: ""
         type: string
 
@@ -630,6 +638,8 @@ jobs:
             --data public/data \
             --state .azl/assets-state.json \
             --bucket "${{ secrets.R2_BUCKET }}" \
+            --prefix "${{ inputs.prune_prefix }}" \
+            --state-prefix "${{ inputs.prune_state_prefix }}" \
             --names ${{ inputs.prune }}
 
       # 预览里被引用集挡下的话，上一步已经 die 了，走不到这里。
@@ -640,6 +650,8 @@ jobs:
             --data public/data \
             --state .azl/assets-state.json \
             --bucket "${{ secrets.R2_BUCKET }}" \
+            --prefix "${{ inputs.prune_prefix }}" \
+            --state-prefix "${{ inputs.prune_state_prefix }}" \
             --apply \
             --names ${{ inputs.prune }}
 
