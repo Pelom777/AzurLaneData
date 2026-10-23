@@ -209,10 +209,44 @@ class PaintingExporter:
         return self.layers
 
     def _position_of(self, layer) -> list:
+        """图层 pivot 点相对画布中心的偏移（前端拿它当锚点位置用）。
+
+        不能直接取 `m_AnchoredPosition`：那是「anchor 点相对父 anchor 参考点」
+        的偏移，差两层东西 ——
+          1. `(pivot - anchorMin) * size`：anchoredPosition 定位的是 anchor 点，
+             而前端画图对齐的是 pivot 点；
+          2. 祖先链：图层可能挂在非根节点下（bisimaiz 的 part 挂在
+             `bisimaiz_rw` 下面，中间还隔一个普通 Transform），父级的
+             `anchoredPosition` 必须累加进来，否则整个部件会跑到画布中间附近。
+        """
         # 基底层自身 anchor 恒为 (0,0)，真正的位置来自 mainFullScreen
         if layer['name'].lower() == self.base_name and self.frame is not None:
             return _vec2(self.frame.m_AnchoredPosition)
-        return _vec2(layer['trans'].m_AnchoredPosition)
+        trans = layer['trans']
+        pos = _vec2(trans.m_AnchoredPosition)
+        size = _vec2(trans.m_SizeDelta)
+        pivot = _vec2(trans.m_Pivot)
+        amin = _vec2(trans.m_AnchorMin)
+        pos[0] += (pivot[0] - amin[0]) * size[0]
+        pos[1] += (pivot[1] - amin[1]) * size[1]
+        cur = trans
+        for _ in range(8):                       # 层级很浅，8 层足够且防环
+            father = getattr(cur, 'm_Father', None)
+            if father is None or getattr(father, 'path_id', 0) == 0:
+                break                            # 到根
+            try:
+                fa = father.read()
+            except Exception:
+                break
+            if getattr(fa, 'm_AnchoredPosition', None) is None:
+                cur = fa                          # 普通 Transform 没有锚点，跳过它
+                continue
+            fsize = _vec2(fa.m_SizeDelta)
+            famin = _vec2(fa.m_AnchorMin)
+            pos[0] += fa.m_AnchoredPosition.x + (famin[0] - 0.5) * fsize[0]
+            pos[1] += fa.m_AnchoredPosition.y + (famin[1] - 0.5) * fsize[1]
+            cur = fa
+        return pos
 
     def _one_layer(self, layer, used: dict, dest: Path):
         mono = layer['mono']
