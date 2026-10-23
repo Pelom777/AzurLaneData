@@ -638,6 +638,47 @@ banjiu  feiniao  gaoxiong_6  xishao  xuebugui  xuequan  yan  zi_shanluan
 （`<key>.png` + 非 `raw` 的 `<key>-mesh.obj`），再看差集。
 未被引用的文件一律不算缺口。
 
+## 4.12 Spine 三件套：`png` / `skel` / `atlas`（2026-10-23）
+
+游戏里包名以 `_skeletondata` 结尾的 bundle 就是标准 Spine 三件套，实测 13 个
+（`spineitem/` 12 个 + `iconframe/` 1 个），每个包里正好三个资源对象：
+一张 `Texture2D`、两个 `TextAsset`（`.skel` 二进制、`.atlas` 文本）。
+
+产物布局与前端约定一致：
+
+```text
+spine/<贴图名>/<贴图名>.png
+spine/<贴图名>/<贴图名>.skel
+spine/<贴图名>/<贴图名>.atlas
+```
+
+三个容易踩的点：
+
+1. **目录名用贴图名，不用清单名**。清单名是 `yxt_bataib_skeletondata`，
+   贴图名是 `yxt_bataiB` —— 大小写不同，而 atlas 正文第一行写的是
+   `<贴图名>.png`。按清单名建目录，atlas 里的引用会指空。
+2. **TextAsset 名字要剥 `.txt`**。Unity 存的是导出工具给的原始文件名，
+   Spine 侧常写成 `<name>.atlas.txt` / `<name>.skel.txt`，前端要的是
+   不带 `.txt` 的那个。实现里对两种写法都兼容（有则剥、无则原样）。
+3. 两类包要排除：
+   - `artresource/**`（8 个）是特效和子弹，只有 skel + atlas、贴图在共享图集里，
+     属于半套，站点也不用；
+   - `spineitem/yxt_batait_skeletondata` 与 `yxt_bataib_skeletondata` 撞名
+     （前者的 atlas 和贴图都叫 `yxt_bataiB`，只有 skel 叫 `yxt_bataiT`），
+     游戏数据自身的问题，保留 B 那套，T 记入 `SPINE_DUP_PACKAGES` 跳过。
+
+跑法（spine 不在默认 items 里，因为它的 marker 路径要等下载后才知道，
+加进默认会让每轮都重做一次）：
+
+```bash
+gh workflow run update-assets.yml -f items=spine -f scope=all
+```
+
+**没解决的那部分**：`spinepainting/` 下的 463 个动态立绘**不是**三件套 ——
+包里只有 `GameObject` / `SkeletonGraphic` / `CanvasRenderer`，没有
+Texture2D 也没有 TextAsset（骨架和图都在依赖 cab 里）。那条链路要另做，
+现在前端仍应 fallback 到静态立绘。
+
 ## 5. 增量同步（CI）
 
 ### 5.1 凭据：4 个 secrets
@@ -873,7 +914,7 @@ r2.dev 因为没有 Cache 规则，实际上只看对象上的 `Cache-Control` �
 | CI 空工作区导致全量重跑 | ✅ 用 `scripts/mark_remote.py` 补 marker 解决，见 §5.2 |
 | `rclone lsf` 缺 `--recursive` 使上面那条失效 | ✅ 已修（2026-10-21 实测发现），见 §5.2 |
 | R2 受限 token 触发 `CreateBucket` 403 | ✅ 已加 `--s3-no-check-bucket` |
-| `spine` 无法自动 | ⚠️ 无生成器，只能从旧仓库搬一次；前端需 fallback |
+| `spine` 无法自动 | ✅ 平台 spine（12 套三件套）已可导出，见 §4.12；⚠️ 463 个 `spinepainting`（Unity SkeletonGraphic）仍无解，前端需 fallback |
 | `HANDOFF.md` 写着"已支持 spine" | ⚠️ 表述有误，实际不支持 |
 | 单 job 跑不下 painting 全量 | ✅ crc32 分片并行，见 §4.5 |
 | 每个分片从空 state 起手 ⇒ 每轮全量 | ✅ 改为继承基线 state + 差分合并，见 §4.5 |
