@@ -27,7 +27,8 @@ from pathlib import Path
 
 from common import is_censored, log, warn
 
-SKIP_NODES = ('frameContain', 'Touch')
+# 一律小写比较：站点不收录的容器节点，以及阴影层（2026-10-26 定：shadow 不要）。
+SKIP_NODES = ('framecontain', 'touch', 'shadow')
 FRAME_NODE = 'mainFullScreen'
 FACE_NODE = 'face'
 
@@ -183,7 +184,7 @@ class PaintingExporter:
             world = (0.0, 0.0) if root else (offset[0] + ap.x, offset[1] + ap.y)
         except Exception:
             world = offset
-        if name in SKIP_NODES:
+        if name.lower() in SKIP_NODES:
             return
         # 和谐版图层（shop_hx 之类）整棵子树都不要：
         # 站点从不收录，写进 json 会让前端多请求一张不该存在的图。
