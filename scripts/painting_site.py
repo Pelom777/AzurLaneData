@@ -280,6 +280,12 @@ class PaintingExporter:
             'position': self._position_of(layer),
             'rawSize': _raw_size(mono),
         }
+        # 有的图层压根没有 mRawSpriteSize 字段（huonululu_5 的根层就是这样），
+        # 直接写成 [0,0] 会让前端 `size/rawSize` 除以零 → 整层不显示。
+        # 退回「我们实际导出的那张图」的像素尺寸，语义上也正是 rawSize 的含义。
+        if not (entry['rawSize'][0] > 0 and entry['rawSize'][1] > 0):
+            entry['rawSize'] = [float(atlas.shape[1]), float(atlas.shape[0])]
+            warn(f'{layer["name"]}: 缺 mRawSpriteSize，按图片尺寸补 {entry["rawSize"]}')
         files = [save_png(dest / f'{key}.png', atlas)]
 
         mesh_ptr = mono.get('mMesh') or {}
