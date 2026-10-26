@@ -92,6 +92,10 @@ on:
         description: "prune 在台账里的路径前缀；留空则同 prune_prefix（spine 要填 char）"
         default: ""
         type: string
+      delete_keys:
+        description: "一次性：按对象键精确删除（空格分隔、含目录，如 painting/ninghai/shadow.png）"
+        default: ""
+        type: string
 
 concurrency:
   group: update-assets
@@ -122,7 +126,7 @@ jobs:
   # 这个 job 不装任何第三方依赖：azl_assets.py 的 cv2 / UnityPy 都是函数内导入，
   # 盘点模式走不到。整个 job 约 20 秒。
   prep:
-    if: ${{ !inputs.refresh_headers && inputs.prune == '' }}
+    if: ${{ !inputs.refresh_headers && inputs.prune == '' && inputs.delete_keys == '' }}
     runs-on: ubuntu-latest
     outputs:
       shards: ${{ steps.decide.outputs.shards }}
@@ -178,7 +182,7 @@ jobs:
 
   assets:
     needs: prep
-    if: ${{ !inputs.refresh_headers && inputs.prune == '' }}
+    if: ${{ !inputs.refresh_headers && inputs.prune == '' && inputs.delete_keys == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
@@ -398,7 +402,7 @@ jobs:
   # 靠它判断"这个资源我已经按哪个 md5 生成过了"。
   merge:
     needs: [prep, assets]
-    if: ${{ !inputs.dry_run && !inputs.refresh_headers && inputs.prune == '' && !cancelled() }}
+    if: ${{ !inputs.dry_run && !inputs.refresh_headers && inputs.prune == '' && inputs.delete_keys == '' && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -689,3 +693,68 @@ jobs:
             echo "| 删除对象 / 体积 | ${{ steps.do.outputs.objects || 0 }} / $(( ${{ steps.do.outputs.bytes || 0 }} / 1048576 )) MB |"
             echo "| 清理台账 | ${{ steps.do.outputs.keys || 0 }} 条 |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # 按对象键精确删除（不是整目录 prune）。用于清掉停止导出后留下的孤儿文件，
+  # 比如不再生成的 painting/<name>/shadow.png。
+  # 键必须写全路径；`deletefile` 只删单个对象，不会碰同目录其它文件。
+  delete:
+    if: ${{ inputs.delete_keys != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 rclone
+        run: |
+          curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o /tmp/rclone.zip
+          unzip -oq /tmp/rclone.zip -d /tmp/rclone
+          cp /tmp/rclone/rclone-*/rclone /usr/local/bin/rclone
+          chmod +x /usr/local/bin/rclone
+
+      - name: 检查 R2 凭据
+        run: |
+          missing=""
+          [ -z "$RCLONE_CONFIG_R2_ACCESS_KEY_ID" ] && missing="$missing R2_ACCESS_KEY_ID"
+          [ -z "$RCLONE_CONFIG_R2_SECRET_ACCESS_KEY" ] && missing="$missing R2_SECRET_ACCESS_KEY"
+          [ -z "${{ secrets.R2_ACCOUNT_ID }}" ] && missing="$missing R2_ACCOUNT_ID"
+          [ -z "${{ secrets.R2_BUCKET }}" ] && missing="$missing R2_BUCKET"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少 secrets:$missing"
+            exit 1
+          fi
+
+      - name: 预览
+        run: |
+          for k in ${{ inputs.delete_keys }}; do
+            case "$k" in
+              */|*..*) echo "::error::非法对象键 $k"; exit 1;;
+            esac
+            n=$(rclone size "r2:${{ secrets.R2_BUCKET }}/$k" --json --s3-no-check-bucket                  | python -c "import json,sys; d=json.load(sys.stdin); print(d['count'], d['bytes'])")
+            echo "  $k → $n"
+          done
+
+      - name: 删除
+        run: |
+          fail=0
+          for k in ${{ inputs.delete_keys }}; do
+            if rclone deletefile "r2:${{ secrets.R2_BUCKET }}/$k" --s3-no-check-bucket; then
+              echo "  已删 $k"
+            else
+              echo "::warning::删除失败 $k"
+              fail=1
+            fi
+            sleep 0.5
+          done
+          exit $fail
+
+      - name: 验证已删
+        run: |
+          bad=0
+          for k in ${{ inputs.delete_keys }}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
+                   "https://pub-85b4b8af407244bc8f1502127fc530c3.r2.dev/$k" || echo 000)
+            echo "  $k → $code"
+            [ "$code" = "404" ] || bad=1
+            sleep 1
+          done
+          [ $bad -eq 0 ] || { echo "::error::仍有对象可访问"; exit 1; }
