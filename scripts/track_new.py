@@ -155,10 +155,14 @@ def main() -> int:
     # ---- 前端契约 new.json：{cg, ship, skin}（首页 home/index.vue 直接读这三个键）
     # cg 是人工维护的轮播图，任何情况下都原样保留。
     cg = front_old.get("cg") or []
-    if baseline:
-        # 建基线这一轮没有"新增"，沿用旧值 —— 否则首页的角标区会突然清空
+    if baseline or not (new_ships or new_skins):
+        # 建基线、或这一轮压根没有新增：沿用旧值。
+        # 只判 baseline 是不够的 —— 版本号变了但没加船的更新（很常见）会把
+        # 上一批"新增"擦掉，首页角标区就空了（2026-10-22 9.7.411 那次就是这么丢的）。
         ship_list = front_old.get("ship") or []
         skin_map = front_old.get("skin") or {}
+        if not baseline and (ship_list or skin_map):
+            log(f"本轮无新增，保留上一批：船 {len(ship_list)} / 皮肤 {len(skin_map)}")
     else:
         ship_list = new_ships
         skin_map = {k: known_skins[k]["ship"] for k in new_skins}
@@ -171,8 +175,11 @@ def main() -> int:
         "ships": {k: known_ships[k] for k in new_ships},
         "skins": {k: known_skins[k] for k in new_skins},
     }
-    (data / "new-latest.json").write_text(
-        json.dumps(latest, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    # 同样只在真有新增时才覆盖：这个文件描述的是"最近一批新增"，
+    # 空批次不该把它清掉。
+    if new_ships or new_skins:
+        (data / "new-latest.json").write_text(
+            json.dumps(latest, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
 
     if baseline:
         log(f"建立台账基线：船 {len(known_ships)} / 皮肤 {len(known_skins)}（不标记为新增）")
