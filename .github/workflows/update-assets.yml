@@ -733,19 +733,14 @@ jobs:
             echo "  $k → $n"
           done
 
+      # 用 delete + --files-from 而不是逐个 deletefile：清单里不存在的键会被
+      # 静默跳过，不会因为某个键本来就没有而让整步失败。
       - name: 删除
         run: |
-          fail=0
-          for k in ${{ inputs.delete_keys }}; do
-            if rclone deletefile "r2:${{ secrets.R2_BUCKET }}/$k" --s3-no-check-bucket; then
-              echo "  已删 $k"
-            else
-              echo "::warning::删除失败 $k"
-              fail=1
-            fi
-            sleep 0.5
-          done
-          exit $fail
+          printf '%s\n' ${{ inputs.delete_keys }} | tr ' ' '\n' | sed '/^$/d' > .azl/delete.lst
+          echo "清单 $(wc -l < .azl/delete.lst) 个键"
+          rclone delete "r2:${{ secrets.R2_BUCKET }}" \
+            --files-from .azl/delete.lst --s3-no-check-bucket --stats-one-line --stats 10s
 
       - name: 验证已删
         run: |
