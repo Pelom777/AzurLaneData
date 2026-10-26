@@ -132,6 +132,7 @@ class PaintingExporter:
         self.frame = None
         self.face_node = None
         self.face_mono = None
+        self.face_world = None
 
     def _monos(self, go):
         for comp in go.m_Component:
@@ -145,14 +146,23 @@ class PaintingExporter:
             if 'm_Sprite' in tt:
                 yield tt
 
-    def _walk(self, trans):
+    def _walk(self, trans, offset=(0.0, 0.0), root=False):
         """遍历子树，收集图层。
 
-        **不累加父节点的 anchoredPosition**。对照 AzurLaneExtractor 的
-        `stack_transform`：每个节点的 box 都以 `根 size/2` 为基准、只加自己的
-        anchor，父级偏移不传递。实测（aersasi_2 / bisimaiz / aersasi）：
-        `left = W/2 - size.x*pivot.x + pos.x` 与官方 box 逐层 0 误差。
-        2026-10-26 加过父链累加，会让 bisimaiz 的 part 右移 458，已撤销。
+        **必须累加父链的 anchoredPosition**，但**根的除外**。
+
+        Unity 里子节点的锚点参考点是父 rect 的中心，父节点有偏移时子节点跟着走。
+        这些立绘的 `layers` 容器常常带偏移：aersasi_2 的 `layers` 是 (361.6, 303.1)，
+        而 `face` 直接挂在根下 —— 不累加就会出现「脸对、人物错」。
+
+        验证：aersasi_2 的 rw 按局部坐标画，头落在 (2102,1065)，face 框在 (2463,763)，
+        差 (-362,+302)；累加 layers 后头落在 (2463,762)，**差 (0,-1)**。
+
+        根节点不参与：官方 stack_transform 里 prev=None 时 pos 直接被写成 [0,0]，
+        aersasi_2 的根是 (-403,0)，带上会整张左移 403。
+
+        注意：AzurLaneExtractor 的 `stack_transform` 只把 `target` 恒定传根 size/2，
+        并不累加父级偏移 —— 它在这类船上同样偏，别拿它当唯一真值。
         """
         if trans.object_reader.type.name != 'RectTransform':
             # 普通 Transform 没有 m_SizeDelta / m_Pivot / m_AnchoredPosition，
@@ -162,12 +172,17 @@ class PaintingExporter:
             # 结果那张立绘少了 rw 图层，画面上就缺一块。
             for child in getattr(trans, 'm_Children', None) or []:
                 try:
-                    self._walk(child.read())
+                    self._walk(child.read(), offset)
                 except Exception:
                     continue
             return
         go = trans.m_GameObject.read()
         name = go.m_Name
+        try:
+            ap = trans.m_AnchoredPosition
+            world = (0.0, 0.0) if root else (offset[0] + ap.x, offset[1] + ap.y)
+        except Exception:
+            world = offset
         if name in SKIP_NODES:
             return
         # 和谐版图层（shop_hx 之类）整棵子树都不要：
@@ -178,15 +193,17 @@ class PaintingExporter:
             self.frame = trans
         elif name == FACE_NODE:
             self.face_node = trans
+            self.face_world = world
             for tt in self._monos(go):
                 self.face_mono = tt
                 break
         else:
             for tt in self._monos(go):
-                self.layers.append({'name': name, 'trans': trans, 'mono': tt})
+                self.layers.append({'name': name, 'trans': trans, 'mono': tt,
+                                    'world': world})
                 break
         for child in trans.m_Children:
-            self._walk(child.read())
+            self._walk(child.read(), world)
 
     def _find_frame(self):
         """mainFullScreen 常常挂在另一个 UI 根下，不在立绘根的子树里，所以全局找。"""
@@ -211,7 +228,7 @@ class PaintingExporter:
                 break
         if root is None:
             raise ValueError('没有找到根 RectTransform')
-        self._walk(root)
+        self._walk(root, root=True)
         if self.frame is None:
             self.frame = self._find_frame()
         return self.layers
@@ -229,6 +246,9 @@ class PaintingExporter:
         # 基底层自身 anchor 恒为 (0,0)，真正的位置来自 mainFullScreen
         if layer['name'].lower() == self.base_name and self.frame is not None:
             return _vec2(self.frame.m_AnchoredPosition)
+        world = layer.get('world')
+        if world is not None:
+            return [float(world[0]), float(world[1])]
         return _vec2(layer['trans'].m_AnchoredPosition)
 
     def _one_layer(self, layer, used: dict, dest: Path):
@@ -309,7 +329,10 @@ class PaintingExporter:
             layout[FACE_NODE] = {
                 'size': _vec2(self.face_node.m_SizeDelta),
                 'pivot': _vec2(self.face_node.m_Pivot),
-                'position': _vec2(self.face_node.m_AnchoredPosition),
+                # 与图层同一套坐标：父链累加（face 通常直接挂根下，那就是它自己的值）
+                'position': ([float(self.face_world[0]), float(self.face_world[1])]
+                             if getattr(self, 'face_world', None) is not None
+                             else _vec2(self.face_node.m_AnchoredPosition)),
                 'rawSize': face_size or _raw_size(self.face_mono),
                 'list': list(range(len(face_images))),
             }
