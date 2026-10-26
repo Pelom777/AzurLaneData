@@ -741,6 +741,37 @@ gh workflow run update-assets.yml -f items=spine -f scope=all   # 含未引用�
 其余用 `aersasi` 逐字段核对过，**0 差异**。重跑用
 `-f items=painting -f only=bisimaiz -f force=true`。
 
+### 4.13 的最终结论（2026-10-26）
+
+以 `AzurLaneExtractor` 的 `stack_transform` 逐层算出的 box 为真值，**导出侧的
+`position` 完全正确**（就是本地 `m_AnchoredPosition`，不做任何父链累加）：
+
+| 船 | 层 | 官方 left/top | `W/2 - size·pivot.x + pos.x` / `H/2 - size·(1-pivot.y) - pos.y` |
+|---|---|---|---|
+| aersasi_2 | rw | 1449 / 1060 | 1449 / 1060 |
+| aersasi_2 | face | 2463 / 763 | 2463 / 763 |
+| bisimaiz | part | 4186 / 1668 | 4186 / 1668 |
+| bisimaiz | face | 5004 / 1941 | 5004 / 1941 |
+
+**错的是前端 y 那一行**，两处都要改（`AzurLaneTools/src/views/profile/index.vue`，
+第 83 行 face 与第 106 行图层两处）：
+
+```diff
+- baseSize[1] / 2 - size[1] * pivot[1] + position[1]
++ baseSize[1] / 2 - size[1] * (1 - pivot[1]) - position[1]
+```
+
+- `pivot[1]` 是 Unity 语义（从底边量），前端当成了从顶边量；
+- `+ position[1]` 的符号也反了。
+
+两者只在 `pivot.y = 0.5` 且 `pos.y = 0` 时互相抵消 —— `face` 的 pivot 恒为
+(0.5,0.5)，所以脸“看起来”一直对，而 `rw` / `part` 这类 `pivot.y ≠ 0.5` 的图层
+（多数是 0.6665）就会偏 `size.y × (2×pivot.y − 1) + 2×pos.y`，aersasi_2 的 rw
+偏了 573px。
+
+> 曾经试过在导出侧做父链累加来“修”这个现象，会让 bisimaiz 的 `part` 右移 458，
+> 已回退（`5afd842` / `e752f22`）。**不要动导出侧的坐标逻辑。**
+
 ## 5. 增量同步（CI）
 
 ### 5.1 凭据：4 个 secrets
