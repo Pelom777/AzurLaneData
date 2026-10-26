@@ -741,45 +741,45 @@ gh workflow run update-assets.yml -f items=spine -f scope=all   # 含未引用�
 其余用 `aersasi` 逐字段核对过，**0 差异**。重跑用
 `-f items=painting -f only=bisimaiz -f force=true`。
 
-### 4.13 的最终结论（2026-10-26，已撤回前一版）
+### 4.13 定案：图层位置要累加父链，根除外（2026-10-26）
 
-**前端公式没有错，导出侧也没有错；两边是同一个坐标系，只是写法不同。**
+**结论**：json 的 `position` = 图层节点到根之间所有 `m_AnchoredPosition` 之和，
+**根节点自己的不计**。前端公式不动。
 
-前一版说"前端 y 那行两处都错、要改成 `-size·(1-pivot) - pos`"是错的，别照做。
-推导（`AzurLaneTools/src/views/profile/index.vue`）：
+依据：Unity 里子节点的锚点参考点是父 rect 的中心，父节点有偏移时子节点跟着走。
+这些立绘的 `layers` 容器常常带偏移，而 `face` 直接挂根下 —— 所以只取局部值会
+出现"脸对、人物错"。
 
-```js
-// 图层内部：原点在左下、y 向上
-sprite.position.set(0, sprite.height); sprite.scale.set(1, -1)
-// 容器整体 y 翻转
-painting.scale.set(baseScale, -baseScale)
-```
-
-图层 `position.set(... , H/2 - size.y*pivot.y + pos.y)` 给的是**翻转后局部空间**的
-坐标，经过上面两处 `-1` 之后落到屏幕上就是：
+aersasi_2 的树：
 
 ```
-screen_top = H/2 - size.y*(1 - pivot.y) - pos.y
+aersasi_2      pos=(-403.0,   0.0)
+  layers       pos=( 361.6, 303.1)   ← 旧逻辑把它丢了
+    aersasi_2_rw  pos=(-371.4,   8.1)
+  face         pos=( -38.7, 661.2)   ← 挂根下，不受影响
 ```
 
-与 `AzurLaneExtractor.stack_transform` 的 box 完全一致。实测（相对基底顶边）：
+**验证用"表情必须落在 rw 里的人物头上"这条硬约束**（face 的 png 是从立绘底图裁下来的，
+把它在 rw 层图上做模板匹配，score 0.999，位于 rw 局部 (653, 5)）：
 
-| 船 / 层 | 前端链路算出 | 官方 box |
-|---|---|---|
-| aersasi_2 · rw | 1059.9 | 1060 |
-| bisimaiz · face | 1941.0 | 1941 |
+| | rw 的 box | 头落点 | face 的 box | 差 |
+|---|---|---|---|---|
+| 只取局部值 | (1449, 1060) | (2102, 1065) | (2463, 763) | (-362, +302) |
+| 累加 layers | (1810, 757) | (2463, 762) | (2463, 763) | **(0, -1)** |
 
-所以 `+ position[1]` 必须保留。把它改成 `-` 会让每层平移 `2×position.y`：
-bisimaiz 的 face 偏 2121px、aersasi_2 的 face 偏 1322px —— 现在显示正常的脸会全部
-飞走。
+线上已按新逻辑重跑（`aersasi_2` 的 rw：`(-371.4, 8.1)` → `(-9.8, 311.2)`）。
 
-**另一个容易误判的点**：基底层的 `position` 前端根本没用（`if (file !== name)`
-跳过），它被钉在容器原点。所以基底自己的 pivot/position 不影响渲染，能比较的只有
-"相对基底的偏移"。
+**为什么以前没发现**：`AzurLaneExtractor.stack_transform` 的 `target` 恒为根
+`size/2`，它也不累加父级 —— 官方工具在这类船上同样偏。大多数船的 `layers` 是
+`(0, 0)`，两种算法结果一致，所以一直没人报。buleisite 逐字段对比旧仓库 json 是
+0 差异，就是这么来的。
 
-**结论**：坐标链路（json `position` → 前端公式 → 官方 box）三层已对齐，这条线到此
-为止。如果某张立绘在游戏里和我们的成品仍不一致，差异不在坐标公式里，只可能在：
-容器的 `mainFullScreen`/`frameContain`、节点 `m_LocalScale`、或运行时动画。
+> 曾经因为拿官方 box 当唯一真值，把"累加父链"当成错误回退过两次（`5afd842`）。
+> 官方 box 只能验证"根偏移要不要算"，不能验证"父级偏移要不要算"。
+>
+> 另一条被证伪的猜想：改前端 `+ position[1]` 为 `-`。那会让每层平移
+> `2×position.y`（bisimaiz 的 face 偏 2121px），因为前端图层内部是左下原点 + y 向上、
+> 容器再整体 `scale.y = -1`，两处翻转已经把 `+` 抵消成官方的 `-size·(1-pivot) - pos`。
 
 ## 5. 增量同步（CI）
 
