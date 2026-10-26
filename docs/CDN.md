@@ -741,36 +741,45 @@ gh workflow run update-assets.yml -f items=spine -f scope=all   # 含未引用�
 其余用 `aersasi` 逐字段核对过，**0 差异**。重跑用
 `-f items=painting -f only=bisimaiz -f force=true`。
 
-### 4.13 的最终结论（2026-10-26）
+### 4.13 的最终结论（2026-10-26，已撤回前一版）
 
-以 `AzurLaneExtractor` 的 `stack_transform` 逐层算出的 box 为真值，**导出侧的
-`position` 完全正确**（就是本地 `m_AnchoredPosition`，不做任何父链累加）：
+**前端公式没有错，导出侧也没有错；两边是同一个坐标系，只是写法不同。**
 
-| 船 | 层 | 官方 left/top | `W/2 - size·pivot.x + pos.x` / `H/2 - size·(1-pivot.y) - pos.y` |
-|---|---|---|---|
-| aersasi_2 | rw | 1449 / 1060 | 1449 / 1060 |
-| aersasi_2 | face | 2463 / 763 | 2463 / 763 |
-| bisimaiz | part | 4186 / 1668 | 4186 / 1668 |
-| bisimaiz | face | 5004 / 1941 | 5004 / 1941 |
+前一版说"前端 y 那行两处都错、要改成 `-size·(1-pivot) - pos`"是错的，别照做。
+推导（`AzurLaneTools/src/views/profile/index.vue`）：
 
-**错的是前端 y 那一行**，两处都要改（`AzurLaneTools/src/views/profile/index.vue`，
-第 83 行 face 与第 106 行图层两处）：
-
-```diff
-- baseSize[1] / 2 - size[1] * pivot[1] + position[1]
-+ baseSize[1] / 2 - size[1] * (1 - pivot[1]) - position[1]
+```js
+// 图层内部：原点在左下、y 向上
+sprite.position.set(0, sprite.height); sprite.scale.set(1, -1)
+// 容器整体 y 翻转
+painting.scale.set(baseScale, -baseScale)
 ```
 
-- `pivot[1]` 是 Unity 语义（从底边量），前端当成了从顶边量；
-- `+ position[1]` 的符号也反了。
+图层 `position.set(... , H/2 - size.y*pivot.y + pos.y)` 给的是**翻转后局部空间**的
+坐标，经过上面两处 `-1` 之后落到屏幕上就是：
 
-两者只在 `pivot.y = 0.5` 且 `pos.y = 0` 时互相抵消 —— `face` 的 pivot 恒为
-(0.5,0.5)，所以脸“看起来”一直对，而 `rw` / `part` 这类 `pivot.y ≠ 0.5` 的图层
-（多数是 0.6665）就会偏 `size.y × (2×pivot.y − 1) + 2×pos.y`，aersasi_2 的 rw
-偏了 573px。
+```
+screen_top = H/2 - size.y*(1 - pivot.y) - pos.y
+```
 
-> 曾经试过在导出侧做父链累加来“修”这个现象，会让 bisimaiz 的 `part` 右移 458，
-> 已回退（`5afd842` / `e752f22`）。**不要动导出侧的坐标逻辑。**
+与 `AzurLaneExtractor.stack_transform` 的 box 完全一致。实测（相对基底顶边）：
+
+| 船 / 层 | 前端链路算出 | 官方 box |
+|---|---|---|
+| aersasi_2 · rw | 1059.9 | 1060 |
+| bisimaiz · face | 1941.0 | 1941 |
+
+所以 `+ position[1]` 必须保留。把它改成 `-` 会让每层平移 `2×position.y`：
+bisimaiz 的 face 偏 2121px、aersasi_2 的 face 偏 1322px —— 现在显示正常的脸会全部
+飞走。
+
+**另一个容易误判的点**：基底层的 `position` 前端根本没用（`if (file !== name)`
+跳过），它被钉在容器原点。所以基底自己的 pivot/position 不影响渲染，能比较的只有
+"相对基底的偏移"。
+
+**结论**：坐标链路（json `position` → 前端公式 → 官方 box）三层已对齐，这条线到此
+为止。如果某张立绘在游戏里和我们的成品仍不一致，差异不在坐标公式里，只可能在：
+容器的 `mainFullScreen`/`frameContain`、节点 `m_LocalScale`、或运行时动画。
 
 ## 5. 增量同步（CI）
 
