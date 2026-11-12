@@ -1,6 +1,6 @@
 {
- "version": "9.7.429",
- "updated": "2026-11-06T18:04:09Z",
+ "version": "9.7.434",
+ "updated": "2026-11-12T03:14:50Z",
  "baseline": false,
  "ships": {
   "22": {
@@ -2271,6 +2271,12 @@
    "rarity": 4,
    "first_seen": null
   },
+  "jumeihuali": {
+   "name": "美莉艾拉 天使空降队/美花莉",
+   "type": 2,
+   "rarity": 5,
+   "first_seen": "2026-11-12T03:14:50Z"
+  },
   "junhe": {
    "name": "骏河",
    "type": 5,
@@ -2708,6 +2714,12 @@
    "type": 3,
    "rarity": 4,
    "first_seen": null
+  },
+  "lilisha": {
+   "name": "莉莉艾露 天使空降队/理理沙",
+   "type": 6,
+   "rarity": 5,
+   "first_seen": "2026-11-12T03:14:50Z"
   },
   "lingbo": {
    "name": "绫波",
@@ -10667,6 +10679,16 @@
    "ship": "juejiang",
    "first_seen": null
   },
+  "jumeihuali": {
+   "name": "美莉艾拉 天使空降队/美花莉",
+   "ship": "jumeihuali",
+   "first_seen": "2026-11-12T03:14:50Z"
+  },
+  "jumeihuali_2": {
+   "name": "献给幸运的你",
+   "ship": "jumeihuali",
+   "first_seen": "2026-11-12T03:14:50Z"
+  },
   "junhe": {
    "name": "骏河",
    "ship": "junhe",
@@ -11596,6 +11618,16 @@
    "name": "月下的邂逅",
    "ship": "lila",
    "first_seen": null
+  },
+  "lilisha": {
+   "name": "莉莉艾露 天使空降队/理理沙",
+   "ship": "lilisha",
+   "first_seen": "2026-11-12T03:14:50Z"
+  },
+  "lilisha_2": {
+   "name": "身心皆奉",
+   "ship": "lilisha",
+   "first_seen": "2026-11-12T03:14:50Z"
   },
   "lingbo": {
    "name": "绫波",
