@@ -144,9 +144,15 @@ jobs:
         run: |
           ARGS="--plan --server $SERVER --public public --cache .azl/bundles \
                 --state .azl/assets-state.json --scope ${{ inputs.scope }} \
-                --items ${{ inputs.items }} --only ${{ inputs.only }}"
+                --items ${{ inputs.items }}"
+          # only 为空时**不能**留着裸的 `--only`：$ARGS 不加引号，空值会被分词
+          # 丢掉，argparse 报 "expected one argument" 并 exit 2。2026-11-12 复盘
+          # 就是这条 —— 只有自动触发（only 为空）100% 挂在 prep，手工填了名字
+          # 的那几次反而是成功的，所以看起来"偶发"。
+          if [ -n "${{ inputs.only }}" ]; then ARGS="$ARGS --only ${{ inputs.only }}"; fi
           # force 意味着"全部重做"，此时盘点也不该走 state 缓存
           if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
+          echo "python scripts/azl_assets.py $ARGS"
           python scripts/azl_assets.py $ARGS
 
       - name: 决定分片数
@@ -286,9 +292,11 @@ jobs:
           ARGS="--server $SERVER --public public --cache .azl/bundles \
                 --state .azl/state-$SHARD.json --scope ${{ inputs.scope }} \
                 --items ${{ inputs.items }} --shard $SHARD/$N \
-                --only ${{ inputs.only }} \
                 --report-files .azl/written-$SHARD.list \
                 --report-failures .azl/failed-$SHARD.json"
+          # 同 prep：only 为空就把整段省掉。留一个裸 `--only` 的后果是它要么
+          # 报错退出 2，要么把后面的 `--report-files` 当成自己的值。
+          if [ -n "${{ inputs.only }}" ]; then ARGS="$ARGS --only ${{ inputs.only }}"; fi
           if [ "${{ inputs.limit }}" != "0" ]; then ARGS="$ARGS --limit ${{ inputs.limit }}"; fi
           if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
