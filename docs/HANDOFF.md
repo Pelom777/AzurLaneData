@@ -133,7 +133,7 @@ scripts32（整体加密的 UnityFS，头也不是 UnityFS）
 |---|---|---|
 | `data` 发布到 R2 的步骤 | **P0** | `update-data.yml` 新增的三步（装 rclone / 查凭据 / 发布）尚未跑过 |
 | R2 上 `data/` 的缓存头 | P1 | 必须是 `max-age=300`，长缓存会让前端读到旧值 |
-| `spine` 无法自动生成 | P1 | 1.10 GB，只能从旧仓库搬一次；新船的 Live2D 会缺，需前端 fallback |
+| `spine` 无法自动生成 | ✅ 已消除 | 2026-10-23 补上三件套生成器（`char/*`），2026-11-12 进 `items` 默认值；见 `docs/CDN.md` §4.12 |
 
 **已排除**：原来怀疑"CDN 只有 32 张、旧链路 35 张对不上"。查清了 —— 差的 3 张是
 `barrage_template` / `bullet_template` / `weapon_property`（无后缀），是游戏把大表
@@ -318,9 +318,9 @@ Class B 基本不怎么消耗。
 6.82 GB 资产 + 3~4 GB 中间文件 + 代码，余量很小。所以：
 
 - `azl_assets.py` 已支持 `--items` 按类别分批（`painting` / `squareicon` /
-  `shipicon` / `equipicon` / `paintingface` / `iconframe` 共 6 类）。
-  **`spine` 不在支持范围**（脚本里没有任何 spine 代码），只能从旧仓库搬一次，
-  见 `docs/CDN.md` §2
+  `shipicon` / `equipicon` / `paintingface` / `iconframe` / `spine`）。
+  **`spine` 2026-10-23 起已支持**（`char/<皮肤名>` 三件套），2026-11-12 起
+  进 `items` 默认值，见 `docs/CDN.md` §4.12
 - 首次建议**分 3~4 次 run**，每次只跑一两个大目录，state 会自动累积
 - `--seed` 的语义是"文件已在磁盘、但 state 没这条记录 → 补记录不下载"；
   如果资产根本不在磁盘上，`--seed` 帮不上忙，只能真下

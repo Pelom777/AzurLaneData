@@ -45,7 +45,13 @@ on:
     inputs:
       items:
         description: "资源类别（空格分隔）"
-        default: "painting squareicon shipicon equipicon iconframe"
+        # spine 2026-11-12 起进默认：每船小人的三件套在 `char/<皮肤名>`，
+        # 只有 3,281 个包、增量一次通常个位数。此前不在默认里，靠人记得手跑，
+        # 结果 9.7.423~434 的新皮肤一个都没补上（前端只能退回静态立绘）。
+        # 当年不放进来的理由是「marker 路径要下载后才知道，会每轮重做」——
+        # 现在跳过判据已经是 `marker_file is None or marker_file.exists()`，
+        # state 命中就跳过，不存在重做。
+        default: "painting squareicon shipicon equipicon iconframe spine"
         type: string
       only:
         description: "只处理这些名字（逗号分隔，不带目录前缀）；配合 force 单独重跑某个资源"

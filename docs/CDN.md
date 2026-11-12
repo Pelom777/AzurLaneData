@@ -11,7 +11,7 @@
 | 用 **Cloudflare R2** 托管，原样上传，**不做任何图片处理** | 6.82 GB / 免费 10 GB，占 68% |
 | **Cloudflare Pages 不能托管图片** | 免费版 20,000 文件/站，我们有 19,443，已占 97% |
 | 没有域名先用 `pub-<桶ID>.r2.dev` | 官方定性"非生产"，但个人站量级够用 |
-| **spine（1.10 GB）无法自动生成**，从旧仓库搬一次 | `azl_assets.py` 里没有任何 spine 代码 |
+| spine 每船小人**已能自动生成**（2,495 套 / 396 MB） | 2026-10-23 加生成器（§4.12），2026-11-12 起进 `items` 默认值 |
 | 首次播种必须在**本地**做，不要放 CI | 6.8 GB 上传 + 生成耗时长，且只需一次 |
 | **CI 必须先从远端补 marker**，否则每轮全量重跑 5.9 GB | 跳过判据要求产物文件在磁盘，而 CI 是干净 checkout |
 
@@ -23,7 +23,7 @@
 | 目录 | 文件数 | 体积 | 占比 | 能否自动 |
 |---|---:|---:|---:|---|
 | `painting` | 7,832 | 5,577.9 MB | 79.9% | ✅ |
-| `spine` | 6,363 | 1,096.3 MB | 15.7% | ❌ |
+| `spine` | 6,363 | 1,096.3 MB | 15.7% | ✅ 2026-10-23 起（旧仓库那份含动态皮肤，生成器只做 `char/*`） |
 | `shipicon` | 2,157 | 130.9 MB | 1.9% | ✅ |
 | `paintingface` | 290 | 85.2 MB | 1.2% | ✅ |
 | `shipbackground` | 70 | 43.9 MB | 0.6% | ❌ |
@@ -48,15 +48,19 @@
 | **B. 一次性搬运** | 6,475 | 1.12 GB | 旧仓库 `public/` | 搬一次，此后不动 |
 | **C. 数据** | 21 | 0.7 MB | `build_data.py` | 进 R2 的 `data/`，由 `update-data.yml` 发布 |
 
-A 类对应 `CATEGORY_LIST` 里实际有产物的 6 个目录：`painting`、`paintingface`、
-`squareicon`、`shipicon`、`equipicon`、`iconframe`。
+A 类对应 `CATEGORY_LIST` 里实际有产物的 7 个目录：`painting`、`paintingface`、
+`squareicon`、`shipicon`、`equipicon`、`iconframe`、`spine`。
 
-B 类 = `spine` + `shipbackground` + `voteicon` + `iconbackground` + `squareback` +
-`spinebase` + `juusui`。这些要么是二进制动画格式（skel/atlas），要么脚本里没有对应
-类别映射。
+B 类 = `shipbackground` + `voteicon` + `iconbackground` + `squareback` +
+`spinebase` + `juusui`。这些要么脚本里没有对应类别映射，要么量小到不值得另写解析。
 
-**B 类的后果要认**：游戏出新皮肤时，`spine` 不会自动补。前端取不到时需要有 fallback
+**B 类的后果要认**：游戏出新资源时它们不会自动补。前端取不到时需要有 fallback
 （退回静态立绘 `painting/<name>/<name>.png`），否则新船的 Live2D 会是空白。
+
+`spine` 原本也在这张表里，2026-10-23 补上三件套生成器后移入 A 类（见 §4.12）。
+但生成器有了、`items` 默认值一直没跟着改 —— 自动触发永远跑不到它，
+9.7.423~434 这几轮更新的新皮肤小人因此全是空的。2026-11-12 才把 `spine`
+加进默认值。
 
 ## 3. 没有域名：r2.dev 的取舍
 
@@ -676,15 +680,21 @@ spine/<皮肤名>/<皮肤名>.atlas
 3. **TextAsset 名要剥 `.txt`**。Unity 存的是导出工具的原始文件名，
    Spine 侧常写成 `<name>.atlas.txt`（有则剥、无则原样）。
 
-跑法（spine 不在默认 items 里，因为它的 marker 路径要等下载后才知道，
-加进默认会让每轮都重做一次）：
+跑法：**2026-11-12 起在 `items` 默认值里**，跟着热更自动补，不用单跑。
+当初没放进默认值的理由是「marker 路径要等下载后才知道，加进去会每轮重做」，
+这条已经不成立 —— 跳过判据是
+`prev.get(key) == md5 and (marker_file is None or marker_file.exists())`，
+spine 的 `marker_file` 恒为 `None`，state 命中就直接跳过；只有 `--force` 才全量重来。
+
+要单独回补某一批（state 被清过、或想抽查某个皮肤）：
 
 ```bash
-gh workflow run update-assets.yml -f items=spine        # scope 默认 used
-gh workflow run update-assets.yml -f items=spine -f scope=all   # 含未引用的
+gh workflow run update-assets.yml -f items=spine                 # scope 默认 used
+gh workflow run update-assets.yml -f items=spine -f scope=all    # 含未引用的
 ```
 
-体量：2,493 个包合计 **396 MB** 下载，产物同量级。
+代价：`--plan --force` 实测 2,500 个包 / **398 MB** 下载，产物同量级；
+增量一轮通常只有个位数（2026-11-12 那轮只差 5 个小人：本次联动的 4 个皮肤 + `quejie`）。
 
 ## 4.13 painting json 的 `position` 是谁的坐标（2026-10-23）
 
@@ -1016,7 +1026,7 @@ r2.dev 因为没有 Cache 规则，实际上只看对象上的 `Cache-Control` �
 | CI 空工作区导致全量重跑 | ✅ 用 `scripts/mark_remote.py` 补 marker 解决，见 §5.2 |
 | `rclone lsf` 缺 `--recursive` 使上面那条失效 | ✅ 已修（2026-10-21 实测发现），见 §5.2 |
 | R2 受限 token 触发 `CreateBucket` 403 | ✅ 已加 `--s3-no-check-bucket` |
-| `spine` 无法自动 | ✅ 每船小人（`char/*`，2,493 套）已可导出，见 §4.12 |
+| `spine` 无法自动 | ✅ 每船小人（`char/*`）已可导出，见 §4.12；2026-11-12 起进 `items` 默认值 |
 | `HANDOFF.md` 写着"已支持 spine" | ⚠️ 表述有误，实际不支持 |
 | 单 job 跑不下 painting 全量 | ✅ crc32 分片并行，见 §4.5 |
 | 每个分片从空 state 起手 ⇒ 每轮全量 | ✅ 改为继承基线 state + 差分合并，见 §4.5 |
@@ -1029,7 +1039,7 @@ r2.dev 因为没有 Cache 规则，实际上只看对象上的 `Cache-Control` �
 | 普通 `Transform` 截断图层遍历 | ✅ 已修，见 §4.9 |
 | 失败项只有计数、查不到是谁 | ✅ `--report-failures` 点名 + 跨片汇总，见 §5.7 |
 | 三个验收用临时 workflow 未清 | ✅ p0-probe / scripts32-probe / stage1-verify 已删（2026-10-22） |
-| `seed-legacy.yml` | ⚠️ **保留**：spine（6,363 文件 / 1.10 GB）还没搬，它是搬存量资产的唯一入口，搬完再删 |
+| `seed-legacy.yml` | ⚠️ **可删**：它当初唯一的用途是搬 spine，但 spine 已于 2026-10-23 由 `update-assets` 自己生成入库（`4d7a257`，新增 2,495）。文件头那段理由已过期，留着只是历史记录 |
 | json 与图片共用 86400 缓存头 | ✅ 已按扩展名分开，见 §4.6 |
 | `_asmr` 皮肤让前端列出两条同名项 | ✅ 数据与资源两侧都不收录，存量已删，见 §4.7 |
 | 不收录的资源不会自动从桶里消失 | ✅ `prune` 入口（先预览再删 + 引用集拦截），见 §4.7 |
