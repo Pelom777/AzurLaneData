@@ -105,6 +105,12 @@ OPTION = {
         #     空格分隔的 `NieR Automata`（都不带冒号）。
         [111, 'To LOVE-Ru'], [112, 'BLACK★ROCK SHOOTER'], [113, 'Atelier Yumia'],
         [114, 'danmachi'], [115, 'Date A Live'], [117, 'NieR Automata'],
+        # 2026-11-12 补 118：《2.5次元的诱惑》联动（莉莉艾露 / 美莉艾拉，
+        # 11-12 维护后实装）。名字用官方英文标题；若要严格照上面 111~117
+        # 那条「抄 equip_skin_theme_template 的作品原名」，这里可能应改成
+        # 「2.5次元の誘惑」—— 那份表要跑 bcdec 才拿得到，本地核不了，先按
+        # 官方英文名落，改的时候只动这一行。
+        [118, '2.5 Dimensional Seduction'],
     ],
 }
 
