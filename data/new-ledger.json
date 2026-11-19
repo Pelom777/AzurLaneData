@@ -1,6 +1,6 @@
 {
- "version": "9.7.434",
- "updated": "2026-11-13T16:31:06Z",
+ "version": "9.7.437",
+ "updated": "2026-11-19T03:39:02Z",
  "baseline": false,
  "ships": {
   "22": {
@@ -6469,6 +6469,11 @@
    "ship": "banerwei",
    "first_seen": null
   },
+  "banerwei_4": {
+   "name": "风中的纯白絮语",
+   "ship": "banerwei",
+   "first_seen": "2026-11-19T03:39:02Z"
+  },
   "bangfeng": {
    "name": "滨风",
    "ship": "bangfeng",
@@ -12749,6 +12754,11 @@
    "ship": "nabulesi",
    "first_seen": null
   },
+  "nabulesi_3": {
+   "name": "误入纯白迷途",
+   "ship": "nabulesi",
+   "first_seen": "2026-11-19T03:39:02Z"
+  },
   "naerxun": {
    "name": "纳尔逊",
    "ship": "naerxun",
@@ -16233,6 +16243,11 @@
    "name": "沉醉的干杯之夜",
    "ship": "xinaoerliang",
    "first_seen": null
+  },
+  "xinaoerliang_3": {
+   "name": "深夜的亲密触诊",
+   "ship": "xinaoerliang",
+   "first_seen": "2026-11-19T03:39:02Z"
   },
   "xingdengbao": {
    "name": "兴登堡",
