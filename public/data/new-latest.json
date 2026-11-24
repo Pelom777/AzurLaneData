@@ -1,22 +1,57 @@
 {
- "version": "9.7.437",
- "updated": "2026-11-19T03:39:02Z",
- "ships": {},
+ "version": "9.7.456",
+ "updated": "2026-11-24T11:07:13Z",
+ "ships": {
+  "moluotuofu": {
+   "name": "莫洛托夫",
+   "type": 2,
+   "rarity": 5,
+   "first_seen": "2026-11-24T11:07:13Z"
+  },
+  "xinuopu": {
+   "name": "锡诺普",
+   "type": 5,
+   "rarity": 5,
+   "first_seen": "2026-11-24T11:07:13Z"
+  },
+  "maliyahuanghou": {
+   "name": "玛丽亚皇后",
+   "type": 5,
+   "rarity": 4,
+   "first_seen": "2026-11-24T11:07:13Z"
+  },
+  "kaiersheng_alter": {
+   "name": "凯尔圣·META",
+   "type": 1,
+   "rarity": 4,
+   "first_seen": "2026-11-24T11:07:13Z"
+  }
+ },
  "skins": {
-  "xinaoerliang_3": {
-   "name": "深夜的亲密触诊",
-   "ship": "xinaoerliang",
-   "first_seen": "2026-11-19T03:39:02Z"
+  "keliaopeitela_3": {
+   "name": "清凉的祝福试炼",
+   "ship": "keliaopeitela",
+   "first_seen": "2026-11-24T11:07:13Z"
   },
-  "nabulesi_3": {
-   "name": "误入纯白迷途",
-   "ship": "nabulesi",
-   "first_seen": "2026-11-19T03:39:02Z"
+  "u556_4": {
+   "name": "小恶魔女仆的限定芭菲",
+   "ship": "u556",
+   "first_seen": "2026-11-24T11:07:13Z"
   },
-  "banerwei_4": {
-   "name": "风中的纯白絮语",
-   "ship": "banerwei",
-   "first_seen": "2026-11-19T03:39:02Z"
+  "moluotuofu_2": {
+   "name": "水上微醺",
+   "ship": "moluotuofu",
+   "first_seen": "2026-11-24T11:07:13Z"
+  },
+  "xinuopu_2": {
+   "name": "沉溺妄想",
+   "ship": "xinuopu",
+   "first_seen": "2026-11-24T11:07:13Z"
+  },
+  "maliyahuanghou_2": {
+   "name": "摇曳风情",
+   "ship": "maliyahuanghou",
+   "first_seen": "2026-11-24T11:07:13Z"
   }
  }
 }

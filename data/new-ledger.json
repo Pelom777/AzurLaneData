@@ -1,6 +1,6 @@
 {
- "version": "9.7.445",
- "updated": "2026-11-19T13:21:37Z",
+ "version": "9.7.456",
+ "updated": "2026-11-24T11:07:13Z",
  "baseline": false,
  "ships": {
   "22": {
@@ -2301,6 +2301,12 @@
    "rarity": 4,
    "first_seen": null
   },
+  "kaiersheng_alter": {
+   "name": "凯尔圣·META",
+   "type": 1,
+   "rarity": 4,
+   "first_seen": "2026-11-24T11:07:13Z"
+  },
   "kaisa": {
    "name": "朱利奥·凯撒",
    "type": 5,
@@ -2973,6 +2979,12 @@
    "rarity": 5,
    "first_seen": null
   },
+  "maliyahuanghou": {
+   "name": "玛丽亚皇后",
+   "type": 5,
+   "rarity": 4,
+   "first_seen": "2026-11-24T11:07:13Z"
+  },
   "manchao": {
    "name": "满潮",
    "type": 1,
@@ -3158,6 +3170,12 @@
    "type": 1,
    "rarity": 4,
    "first_seen": null
+  },
+  "moluotuofu": {
+   "name": "莫洛托夫",
+   "type": 2,
+   "rarity": 5,
+   "first_seen": "2026-11-24T11:07:13Z"
   },
   "monika_doa": {
    "name": "莫妮卡",
@@ -4700,6 +4718,12 @@
    "type": 7,
    "rarity": 4,
    "first_seen": null
+  },
+  "xinuopu": {
+   "name": "锡诺普",
+   "type": 5,
+   "rarity": 5,
+   "first_seen": "2026-11-24T11:07:13Z"
   },
   "xinyue": {
    "name": "新月",
@@ -10764,6 +10788,11 @@
    "ship": "kaiersheng",
    "first_seen": null
   },
+  "kaiersheng_alter": {
+   "name": "凯尔圣·META",
+   "ship": "kaiersheng_alter",
+   "first_seen": "2026-11-24T11:07:13Z"
+  },
   "kaisa": {
    "name": "朱利奥·凯撒",
    "ship": "kaisa",
@@ -10978,6 +11007,11 @@
    "name": "星辰与玫瑰",
    "ship": "keliaopeitela",
    "first_seen": null
+  },
+  "keliaopeitela_3": {
+   "name": "清凉的祝福试炼",
+   "ship": "keliaopeitela",
+   "first_seen": "2026-11-24T11:07:13Z"
   },
   "kelifulan": {
    "name": "克利夫兰",
@@ -12254,6 +12288,16 @@
    "ship": "maliluosi_doa",
    "first_seen": null
   },
+  "maliyahuanghou": {
+   "name": "玛丽亚皇后",
+   "ship": "maliyahuanghou",
+   "first_seen": "2026-11-24T11:07:13Z"
+  },
+  "maliyahuanghou_2": {
+   "name": "摇曳风情",
+   "ship": "maliyahuanghou",
+   "first_seen": "2026-11-24T11:07:13Z"
+  },
   "manchao": {
    "name": "满潮",
    "ship": "manchao",
@@ -12663,6 +12707,16 @@
    "name": "科技？忍术？",
    "ship": "molisen",
    "first_seen": null
+  },
+  "moluotuofu": {
+   "name": "莫洛托夫",
+   "ship": "moluotuofu",
+   "first_seen": "2026-11-24T11:07:13Z"
+  },
+  "moluotuofu_2": {
+   "name": "水上微醺",
+   "ship": "moluotuofu",
+   "first_seen": "2026-11-24T11:07:13Z"
   },
   "monika_2_doa": {
    "name": "特别的红心Ace",
@@ -15299,6 +15353,11 @@
    "ship": "u556",
    "first_seen": null
   },
+  "u556_4": {
+   "name": "小恶魔女仆的限定芭菲",
+   "ship": "u556",
+   "first_seen": "2026-11-24T11:07:13Z"
+  },
   "u556_alter": {
    "name": "U-556·META",
    "ship": "u556_alter",
@@ -16313,6 +16372,16 @@
    "name": "小信浓",
    "ship": "xinnong_younv",
    "first_seen": null
+  },
+  "xinuopu": {
+   "name": "锡诺普",
+   "ship": "xinuopu",
+   "first_seen": "2026-11-24T11:07:13Z"
+  },
+  "xinuopu_2": {
+   "name": "沉溺妄想",
+   "ship": "xinuopu",
+   "first_seen": "2026-11-24T11:07:13Z"
   },
   "xinyue": {
    "name": "新月",
